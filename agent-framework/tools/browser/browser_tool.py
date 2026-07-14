@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import threading
+from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from tools.browser.detector import ClickableElementDetector, filter_nested_elements, INTERACTIVE_SCAN_JS
@@ -35,14 +36,14 @@ class BrowserTool:
         self,
         llm,
         headless: bool = False,
-        profile_dir: str | None = None,
+        storage_state_path: str | None = None,
         max_elements: int = 100,
         viewport: dict | None = None,
         use_vision: bool = False,
     ):
         self._llm = llm
         self.headless = headless
-        self.profile_dir = profile_dir
+        self.storage_state_path = storage_state_path
         self.max_elements = max_elements
         self.viewport = viewport or {'width': 1280, 'height': 720}
         self.use_vision = use_vision
@@ -55,25 +56,36 @@ class BrowserTool:
 
     # ========== LIFECYCLE ==========
     async def start(self):
+        """Nạp lại session đã đăng nhập từ storage_state_path (cookie + localStorage,
+        JSON gọn — KHÔNG phải toàn bộ profile Chromium) nếu file đã tồn tại. File này
+        chỉ được TẠO bởi scripts/setup_browser_login.py (đăng nhập thủ công 1 lần,
+        ngoài agent) — BrowserTool ở đây chỉ ĐỌC lại, không bao giờ tự đăng nhập."""
         self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(headless=self.headless)
 
-        if self.profile_dir:
-            self._context = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir=self.profile_dir,
-                headless=self.headless,
-                viewport=self.viewport,
-            )
-            self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
-        else:
-            self._browser = await self._playwright.chromium.launch(headless=self.headless)
-            self._context = await self._browser.new_context(viewport=self.viewport)
-            self._page = await self._context.new_page()
+        storage_state = (
+            self.storage_state_path
+            if self.storage_state_path and Path(self.storage_state_path).exists()
+            else None
+        )
+        self._context = await self._browser.new_context(viewport=self.viewport, storage_state=storage_state)
+        self._page = await self._context.new_page()
+
+    async def save_storage_state(self, path: str) -> str:
+        """Xuất cookie + localStorage hiện tại ra file JSON — dùng bởi
+        scripts/setup_browser_login.py sau khi người dùng đăng nhập thủ công.
+        Không phải tool cho agent gọi (không nằm trong registration.py)."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        await self._context.storage_state(path=path)
+        return f"Saved storage state to {path}"
 
     async def stop(self):
-        if self._browser:
-            await self._browser.close()
+        # Đóng context trước rồi mới đóng browser — đóng ngược lại có thể khiến
+        # context.close() thao tác trên browser đã chết.
         if self._context:
             await self._context.close()
+        if self._browser:
+            await self._browser.close()
         if self._playwright:
             await self._playwright.stop()
 
@@ -312,3 +324,6 @@ class SyncBrowserTool:
 
     def type_sensitive(self, index: int, placeholder: str, sensitive_data: dict) -> str:
         return self._loop_thread.run(self._tool.type_sensitive(index, placeholder, sensitive_data))
+
+    def save_storage_state(self, path: str) -> str:
+        return self._loop_thread.run(self._tool.save_storage_state(path))

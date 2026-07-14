@@ -6,8 +6,16 @@ Chạy thử: python main.py
 (cần set biến môi trường DEEPSEEK_API_KEY, hoặc đổi base_url/model cho provider khác)
 """
 
+import sys
 import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
+load_dotenv()
 
 from core.llm_client import LLMClient
 from core.context_manager import ContextManager
@@ -104,7 +112,7 @@ def main() -> None:
     sync_browser = SyncBrowserTool(
         llm,
         headless=os.environ.get("BROWSER_HEADLESS", "false").lower() == "true",
-        profile_dir=os.environ.get("BROWSER_PROFILE_DIR") or None,
+        storage_state_path=os.environ.get("BROWSER_STORAGE_STATE") or None,
         use_vision=False,  # DeepSeek không có vision
     )
     sync_browser.start()

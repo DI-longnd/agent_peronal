@@ -37,3 +37,9 @@ vào 1 dịch vụ để lấy thông tin.
   overlay che phía trên thay vì element thật bên dưới.
 - **`browser__extract` dùng LLM để đọc trang** — nếu trang rất dài (>100,000 ký tự),
   kết quả sẽ báo bị cắt kèm `start_from_char` để tiếp tục đọc phần sau.
+- **Trang cần đăng nhập (Facebook...)**: agent KHÔNG tự đăng nhập. Session (cookie +
+  localStorage) được setup 1 lần, thủ công, NGOÀI agent bằng
+  `scripts/setup_browser_login.py` — kết quả lưu vào file JSON tại biến môi trường
+  `BROWSER_STORAGE_STATE`. Agent chỉ đọc lại session đã có sẵn; nếu trang vẫn hiện
+  form đăng nhập nghĩa là session hết hạn hoặc chưa từng chạy script setup — báo lại
+  cho người dùng, không cố tự điền thử tài khoản/mật khẩu.

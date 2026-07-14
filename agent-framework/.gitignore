@@ -11,3 +11,6 @@ wheels/
 
 # Secrets
 .env
+
+# Browser storage state (chứa cookie/session đăng nhập thật — không commit)
+.auth/
