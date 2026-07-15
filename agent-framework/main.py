@@ -1,6 +1,10 @@
 """
-main.py — wiring toàn bộ framework: LLM client, tool registry, skill loader,
-context manager, subagent dispatcher, rồi chạy 1 ví dụ.
+main.py — CLI ALL-IN-ONE (não + tay cùng tiến trình): wiring toàn bộ framework
+để chạy thử/debug nhanh mà không cần dựng server + companion app + web.
+
+Đây là công cụ debug quan trọng nhất của dự án (PLAN.md quyết định #20):
+event stream in ra console ở đây CHÍNH LÀ thứ sau này chảy qua WebSocket
+lên giao diện web — thấy sai ở đây thì sửa trước khi đụng tới server.
 
 Chạy thử: python main.py
 (cần set biến môi trường DEEPSEEK_API_KEY, hoặc đổi base_url/model cho provider khác)
@@ -8,6 +12,7 @@ Chạy thử: python main.py
 
 import sys
 import os
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,8 +28,6 @@ from core.agent_loop import AgentLoop
 from tools.registry import ToolRegistry, Tool
 from tools.skill_loader import SkillLoader
 from subagents.dispatcher import SubagentDispatcher, load_subagent_config
-from tools.browser.browser_tool import SyncBrowserTool
-from tools.browser.registration import build_browser_registry, load_sensitive_data_from_env
 
 ROOT = Path(__file__).parent
 
@@ -91,15 +94,10 @@ def build_ecom_registry() -> ToolRegistry:
     return registry
 
 
-def build_full_registry(sync_browser: SyncBrowserTool, sensitive_data: dict) -> ToolRegistry:
-    """Gộp tool của mọi domain vào 1 registry — SubagentDispatcher cần thấy
-    TOÀN BỘ tool đã đăng ký để lọc theo allowed_tools của từng subagent."""
-    full = ToolRegistry()
-    for tool in build_ecom_registry().all_tools():
-        full.register(tool)
-    for tool in build_browser_registry(sync_browser, sensitive_data).all_tools():
-        full.register(tool)
-    return full
+def print_event(event: dict) -> None:
+    """Mô phỏng đầu nhận WebSocket: mỗi event 1 dòng JSON — chính là format
+    UI sẽ nhận. Debug event stream bằng mắt ở đây."""
+    print(f"[event] {json.dumps(event, ensure_ascii=False)}")
 
 
 def main() -> None:
@@ -109,37 +107,61 @@ def main() -> None:
         model="deepseek-chat",
     )
 
-    sync_browser = SyncBrowserTool(
+    # full_registry của dispatcher chỉ chứa tool server-side (ecom). Browser tools
+    # KHÔNG nằm ở đây — chúng đến từ local_tools_factory khi subagent needs_device
+    # được dispatch (PLAN.md 4.6). Ở CLI all-in-one, factory bind SyncBrowserTool
+    # chạy cùng máy, khởi động LAZY (chỉ tốn Chromium khi task thật sự cần browser
+    # — giống hệt hành vi của companion app sau này).
+    full_registry = build_ecom_registry()
+    skills = SkillLoader(ROOT / "skills")
+    context_mgr = ContextManager(llm, notes_path=ROOT / "memory/notes/main.md")
+
+    browser_holder: dict = {"tool": None}
+
+    def local_tools_factory() -> ToolRegistry:
+        # Import ở đây (không phải đầu file) để CLI vẫn chạy được các task không
+        # cần browser trong môi trường chưa cài playwright.
+        from tools.browser.browser_tool import SyncBrowserTool
+        from tools.browser.registration import build_browser_registry, load_sensitive_data_from_env
+
+        if browser_holder["tool"] is None:
+            sync_browser = SyncBrowserTool(
+                llm,
+                headless=os.environ.get("BROWSER_HEADLESS", "false").lower() == "true",
+                storage_state_path=os.environ.get("BROWSER_STORAGE_STATE") or None,
+                use_vision=False,  # DeepSeek không có vision
+            )
+            sync_browser.start()
+            browser_holder["tool"] = sync_browser
+        return build_browser_registry(browser_holder["tool"], load_sensitive_data_from_env())
+
+    dispatcher = SubagentDispatcher(
         llm,
-        headless=os.environ.get("BROWSER_HEADLESS", "false").lower() == "true",
-        storage_state_path=os.environ.get("BROWSER_STORAGE_STATE") or None,
-        use_vision=False,  # DeepSeek không có vision
+        full_registry,
+        skills,
+        notes_dir=ROOT / "memory/notes",
+        local_tools_factory=local_tools_factory,
     )
-    sync_browser.start()
+    dispatcher.register(load_subagent_config(ROOT / "subagents/ecom-agent.md"))
+    dispatcher.register(load_subagent_config(ROOT / "subagents/browser-agent.md"))
+
+    main_agent = AgentLoop(
+        llm=llm,
+        registry=ToolRegistry(),  # main agent không cầm tool trực tiếp, chỉ điều phối
+        skills=skills,
+        context_mgr=context_mgr,
+        system_prompt="Bạn là trợ lý cá nhân. Điều phối task xuống đúng subagent hoặc skill phù hợp.",
+        dispatcher=dispatcher,
+    )
 
     try:
-        sensitive_data = load_sensitive_data_from_env()
-        registry = build_full_registry(sync_browser, sensitive_data)
-        skills = SkillLoader(ROOT / "skills")
-        context_mgr = ContextManager(llm, notes_path=ROOT / "memory/notes/main.md")
-
-        dispatcher = SubagentDispatcher(llm, registry, skills, notes_dir=ROOT / "memory/notes")
-        dispatcher.register(load_subagent_config(ROOT / "subagents/ecom-agent.md"))
-        dispatcher.register(load_subagent_config(ROOT / "subagents/browser-agent.md"))
-
-        main_agent = AgentLoop(
-            llm=llm,
-            registry=ToolRegistry(),  # main agent không cầm tool trực tiếp, chỉ điều phối
-            skills=skills,
-            context_mgr=context_mgr,
-            system_prompt="Bạn là trợ lý cá nhân. Điều phối task xuống đúng subagent hoặc skill phù hợp.",
-            dispatcher=dispatcher,
+        result = main_agent.run(
+            "Kiểm tra tình trạng đơn hàng SA-00123 giúp tôi", on_event=print_event
         )
-
-        result = main_agent.run("Kiểm tra tình trạng đơn hàng SA-00123 giúp tôi")
         print(result)
     finally:
-        sync_browser.stop()
+        if browser_holder["tool"] is not None:
+            browser_holder["tool"].stop()
 
 
 if __name__ == "__main__":

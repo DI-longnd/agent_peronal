@@ -22,13 +22,14 @@ async thành 1 method sync gọi qua asyncio.run_coroutine_threadsafe(...).
 from __future__ import annotations
 import asyncio
 import base64
+import json
 import threading
 from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from tools.browser.detector import ClickableElementDetector, filter_nested_elements, INTERACTIVE_SCAN_JS
 from tools.browser.serializer import DOMSerializer
-from tools.browser.extract_action import ExtractAction
+from tools.browser.extract_action import ExtractAction, page_to_markdown
 
 
 class BrowserTool:
@@ -218,6 +219,13 @@ class BrowserTool:
             start_from_char=start_from_char,
         )
 
+    async def page_markdown(self, start_from_char: int = 0) -> str:
+        """Nửa 'device' của browser__extract (PLAN.md 4.6): chỉ chụp nội dung trang
+        thành markdown, KHÔNG gọi LLM — server nhận JSON này rồi tự chạy LLM
+        extraction. Trả JSON string {"url","markdown","truncated","next_start"}."""
+        payload = await page_to_markdown(self._page, start_from_char)
+        return json.dumps(payload, ensure_ascii=False)
+
     # ========== SENSITIVE DATA ==========
     async def type_sensitive(self, index: int, placeholder: str, sensitive_data: dict) -> str:
         """Gõ sensitive data (password, API key...) an toàn — KHÔNG bao giờ
@@ -321,6 +329,9 @@ class SyncBrowserTool:
 
     def extract(self, query: str, extract_links: bool = False, start_from_char: int = 0) -> str:
         return self._loop_thread.run(self._tool.extract(query, extract_links, start_from_char))
+
+    def page_markdown(self, start_from_char: int = 0) -> str:
+        return self._loop_thread.run(self._tool.page_markdown(start_from_char))
 
     def type_sensitive(self, index: int, placeholder: str, sensitive_data: dict) -> str:
         return self._loop_thread.run(self._tool.type_sensitive(index, placeholder, sensitive_data))

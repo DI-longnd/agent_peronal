@@ -4,6 +4,7 @@ description: >
   Dùng subagent này khi task cần mở trang web, điền form, click, tìm kiếm trên web,
   đăng nhập, hoặc trích xuất thông tin từ 1 trang cụ thể. Trả về: kết quả cuối cùng
   (dữ liệu đã trích xuất, hoặc xác nhận hành động đã hoàn thành).
+needs_device: true
 tools:
   - browser__navigate
   - browser__get_state
