@@ -521,13 +521,13 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
 
 ### Các bước
 
-- [ ] **2.1** `config.py`: đọc/ghi `%APPDATA%/PersonalAgent/config.json` theo 3.4 (dùng `os.environ["APPDATA"]`, fallback `~/.personal-agent/` cho non-Windows).
-- [ ] **2.2** `pairing.py`: chưa có `device_token` → hỏi `server_url` (input console, default hardcode), POST pair/start, **in mã 6 số to rõ** + hướng dẫn "Nhập mã này vào trang web", poll 2s tới khi paired → lưu token.
-- [ ] **2.3** `executor.py`: map `tool_name → method` từ `BROWSER_TOOL_SPECS` + `browser__page_markdown`; SyncBrowserTool khởi động **lazy** call đầu (llm=None, headless theo config, storage_state theo config), idle timer 5 phút tự `stop()`; mọi exception → trả string lỗi actionable; validate tool name thuộc whitelist.
-- [ ] **2.4** `app.py`: vòng đời chính — config → pairing nếu cần → WS connect (`hello`) → loop nhận `tool_call`/`ping` → chạy tool trong thread pool size 1 (tool browser tuần tự) → gửi `tool_result`. Reconnect backoff 2s→4s→8s (max 30s). `hello_failed` → xóa token → quay lại pairing. Console in log thân thiện ("Đã kết nối", "Đang chạy: mở trang X...").
-- [ ] **2.5** `login_setup.py`: menu console khi chạy `app.py --login <url>`: mở browser visible (dùng SyncBrowserTool + storage_state config), khách tự đăng nhập, Enter để lưu state. (Tái dùng logic `scripts/setup_browser_login.py`, đổi đường dẫn theo config app.)
-- [ ] **2.6** Import chung: `local-agent/` import `agent-framework/` bằng `sys.path.insert` (giống server). PyInstaller spec phải gom cả 2 thư mục.
-- [ ] **2.7** `build.spec` + hướng dẫn build: PyInstaller onedir (KHÔNG onefile — Playwright cần cấu trúc thư mục), console app. Lần chạy đầu app tự chạy `playwright install chromium` nếu chưa có (check `~/AppData/Local/ms-playwright`). Ghi rõ README: exe chưa ký → SmartScreen cảnh báo, tester bấm "Run anyway" (chấp nhận ở quy mô này).
+- [x] **2.1** `config.py`: đọc/ghi `%APPDATA%/PersonalAgent/config.json` theo 3.4 (dùng `os.environ["APPDATA"]`, fallback `~/.personal-agent/` cho non-Windows).
+- [x] **2.2** `pairing.py`: chưa có `device_token` → hỏi `server_url` (input console, default hardcode), POST pair/start, **in mã 6 số to rõ** + hướng dẫn "Nhập mã này vào trang web", poll 2s tới khi paired → lưu token.
+- [x] **2.3** `executor.py`: map `tool_name → method` từ `BROWSER_TOOL_SPECS` + `browser__page_markdown`; SyncBrowserTool khởi động **lazy** call đầu (llm=None, headless theo config, storage_state theo config), idle timer 5 phút tự `stop()`; mọi exception → trả string lỗi actionable; validate tool name thuộc whitelist.
+- [x] **2.4** `app.py`: vòng đời chính — config → pairing nếu cần → WS connect (`hello`) → loop nhận `tool_call`/`ping` → chạy tool trong thread pool size 1 (tool browser tuần tự) → gửi `tool_result`. Reconnect backoff 2s→4s→8s (max 30s). `hello_failed` → xóa token → quay lại pairing. Console in log thân thiện ("Đã kết nối", "Đang chạy: mở trang X...").
+- [x] **2.5** `login_setup.py`: menu console khi chạy `app.py --login <url>`: mở browser visible (dùng SyncBrowserTool + storage_state config), khách tự đăng nhập, Enter để lưu state. (Tái dùng logic `scripts/setup_browser_login.py`, đổi đường dẫn theo config app.)
+- [x] **2.6** Import chung: `local-agent/` import `agent-framework/` bằng `sys.path.insert` (giống server). PyInstaller spec phải gom cả 2 thư mục.
+- [x] **2.7** `build.spec` + hướng dẫn build: PyInstaller onedir (KHÔNG onefile — Playwright cần cấu trúc thư mục), console app. Lần chạy đầu app tự chạy `playwright install chromium` nếu chưa có (check `~/AppData/Local/ms-playwright`). Ghi rõ README: exe chưa ký → SmartScreen cảnh báo, tester bấm "Run anyway" (chấp nhận ở quy mô này).
 
 ### Definition of Done
 - Máy dev: chạy `python local-agent/app.py` (chưa đóng gói) + server local + test_client: task "vào duckduckgo tìm giá bitcoin" chạy **end-to-end xuyên 3 tiến trình** (test_client → server → app → browser bật lên → kết quả về test_client).

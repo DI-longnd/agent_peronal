@@ -8,3 +8,10 @@ __pycache__/
 # Frontend (Phase 3)
 web/node_modules/
 web/dist/
+
+# Companion app build (PyInstaller)
+local-agent/dist/
+local-agent/build/
+
+# Config test local
+.test-agent-config/
