@@ -494,15 +494,15 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
 
 ### Các bước
 
-- [ ] **1.1** `config.py`: dataclass đọc env bảng 3.4, fail sớm nếu thiếu biến bắt buộc.
-- [ ] **1.2** `sessions.py`: `SessionStore` theo schema 4.4 — method: `create_user(name)`, `get_user_by_invite(token)`, `upsert_device(user_id, name) -> device_token`, `get_device(user_id)`, `get_user_by_device_token(token)`, `create_session/list/get_messages/add_message/delete`, `record_run`.
-- [ ] **1.3** `manage.py`: `python -m server.manage add-user "Tên"` → tạo user, in `https://<domain>/?invite=<token>`. Thêm `list-users`.
-- [ ] **1.4** `pairing.py`: dict in-memory `{code: {device_name, poll_token, expires, user_id|None, device_token|None}}`, TTL 10 phút, code = 6 chữ số `secrets.randbelow`.
-- [ ] **1.5** `device_hub.py`: `DeviceHub` theo 4.6 — `register/unregister/is_online/call_tool` + ping 30s + fail pending futures khi disconnect + callback `on_presence_change(user_id)` để app.py đẩy `device_status` cho web WS của user đó.
-- [ ] **1.6** `remote_tools.py`: build ToolRegistry stub từ `BROWSER_TOOL_SPECS` (trừ `page_markdown` không expose cho agent; `extract` là composite theo 4.6).
-- [ ] **1.7** `runner.py`: `AgentRunner` theo 4.5 — active dict theo `user_id`, semaphore, timeout, cancel.
-- [ ] **1.8** `app.py`: lifespan (config, store, hub, skills); `WS /ws` (protocol 4.2); `WS /ws/device` (protocol 4.3); REST 4.2 + pairing 4.3; mount `web/dist` nếu tồn tại; import path fix: `sys.path.insert(0, str(ROOT / "agent-framework"))` (KHÔNG đổi tên thư mục, KHÔNG làm package).
-- [ ] **1.9** `test_client.py`: connect, auth bằng invite token, gửi chat, in mọi event đến `run_finished`. (Được phép cài `websockets` làm dev-dependency.)
+- [x] **1.1** `config.py`: dataclass đọc env bảng 3.4, fail sớm nếu thiếu biến bắt buộc.
+- [x] **1.2** `sessions.py`: `SessionStore` theo schema 4.4 — method: `create_user(name)`, `get_user_by_invite(token)`, `upsert_device(user_id, name) -> device_token`, `get_device(user_id)`, `get_user_by_device_token(token)`, `create_session/list/get_messages/add_message/delete`, `record_run`.
+- [x] **1.3** `manage.py`: `python -m server.manage add-user "Tên"` → tạo user, in `https://<domain>/?invite=<token>`. Thêm `list-users`.
+- [x] **1.4** `pairing.py`: dict in-memory `{code: {device_name, poll_token, expires, user_id|None, device_token|None}}`, TTL 10 phút, code = 6 chữ số `secrets.randbelow`.
+- [x] **1.5** `device_hub.py`: `DeviceHub` theo 4.6 — `register/unregister/is_online/call_tool` + ping 30s + fail pending futures khi disconnect + callback `on_presence_change(user_id)` để app.py đẩy `device_status` cho web WS của user đó.
+- [x] **1.6** `remote_tools.py`: build ToolRegistry stub từ `BROWSER_TOOL_SPECS` (trừ `page_markdown` không expose cho agent; `extract` là composite theo 4.6).
+- [x] **1.7** `runner.py`: `AgentRunner` theo 4.5 — active dict theo `user_id`, semaphore, timeout, cancel.
+- [x] **1.8** `app.py`: lifespan (config, store, hub, skills); `WS /ws` (protocol 4.2); `WS /ws/device` (protocol 4.3); REST 4.2 + pairing 4.3; mount `web/dist` nếu tồn tại; import path fix: `sys.path.insert(0, str(ROOT / "agent-framework"))` (KHÔNG đổi tên thư mục, KHÔNG làm package).
+- [x] **1.9** `test_client.py`: connect, auth bằng invite token, gửi chat, in mọi event đến `run_finished`. (Được phép cài `websockets` làm dev-dependency.)
 
 ### Definition of Done
 - `uvicorn server.app:app` chạy; `manage.py add-user` tạo được user.

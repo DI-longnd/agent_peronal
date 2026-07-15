@@ -1,0 +1,10 @@
+# Runtime data của server — SQLite, notes, browser auth state
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Frontend (Phase 3)
+web/node_modules/
+web/dist/
