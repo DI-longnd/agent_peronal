@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Markdown trong bubble trả lời — style tối thiểu, không kéo plugin typography */
+.md p { margin: 0.4rem 0; }
+.md h1, .md h2, .md h3 { font-weight: 700; margin: 0.6rem 0 0.3rem; }
+.md h1 { font-size: 1.15rem; } .md h2 { font-size: 1.05rem; } .md h3 { font-size: 1rem; }
+.md ul, .md ol { padding-left: 1.25rem; margin: 0.4rem 0; }
+.md ul { list-style: disc; } .md ol { list-style: decimal; }
+.md table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
+.md th, .md td { border: 1px solid #d4d4d8; padding: 0.25rem 0.6rem; text-align: left; }
+.md th { background: #f4f4f5; }
+.md code { background: #f4f4f5; padding: 0.1rem 0.3rem; border-radius: 0.25rem; font-size: 0.85em; }
+.md pre { background: #18181b; color: #fafafa; padding: 0.6rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+.md pre code { background: transparent; padding: 0; color: inherit; }
+.md blockquote { border-left: 3px solid #d4d4d8; padding-left: 0.75rem; color: #52525b; margin: 0.5rem 0; }
+.md a { color: #2563eb; text-decoration: underline; }
