@@ -1,3 +1,6 @@
+# Secrets — KHÔNG BAO GIỜ commit
+.env
+
 # Runtime data của server — SQLite, notes, browser auth state
 data/
 
