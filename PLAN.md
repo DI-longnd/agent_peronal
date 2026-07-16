@@ -604,8 +604,8 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
   4. Clone repo, tạo `.env`, `docker compose -f docker/docker-compose.yml up -d --build`.
   5. ufw: chỉ mở 22, 80, 443.
   6. `docker compose exec app python -m server.manage add-user "Tên"` → gửi invite link cho tester.
-- [ ] **4.5** Companion app build trỏ `server_url` mặc định = `wss://<domain>`; smoke test: pairing + 1 task browser end-to-end từ máy khách thật qua Internet.
-  - *Hiện trạng 2026-07-16: server đã deploy tại VPS `103.72.56.204` (Ubuntu 24.04), CHƯA có domain — đang chạy HTTP qua IP (`DOMAIN=http://103.72.56.204` trong `docker/.env` trên server). Smoke test pairing + task browser qua Internet đã PASS (app chạy từ source trỏ `ws://103.72.56.204`). Còn lại khi có domain: trỏ DNS → sửa `docker/.env` → restart caddy (HTTPS tự động) → build exe với default `wss://<domain>`.*
+- [x] **4.5** Companion app build trỏ `server_url` mặc định = `wss://<domain>`; smoke test: pairing + 1 task browser end-to-end từ máy khách thật qua Internet.
+  - *Đã deploy 2026-07-16: VPS `103.72.56.204` (Ubuntu 24.04), domain `ecomerceagnet.duckdns.org` (DuckDNS miễn phí, đổi sau dễ), HTTPS Let's Encrypt qua Caddy, ufw 22/80/443. Default server_url của app = `DEFAULT_SERVER_URL` trong `local-agent/config.py` — đổi domain thì sửa dòng đó rồi build lại. Smoke test bản exe PyInstaller: pairing + task browser end-to-end qua wss PASS.*
 
 ### Definition of Done
 - Local: `docker compose up -d` → `http://localhost` đầy đủ chức năng (trừ pairing cần app).

@@ -24,3 +24,4 @@ docker/.env
 
 # Test nhắm server thật — chứa invite token thật, KHÔNG commit (repo public)
 .test-ui/dod_remote_*
+.test-ui/dod_https_*

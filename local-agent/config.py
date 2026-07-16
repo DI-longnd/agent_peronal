@@ -28,9 +28,14 @@ def config_path() -> Path:
     return config_dir() / "config.json"
 
 
+# Server mặc định cho bản build phát hành — tester chạy exe là kết nối luôn,
+# không phải nhập gì. Đổi domain: sửa dòng này rồi build lại (PLAN.md 4.5/9.4).
+DEFAULT_SERVER_URL = "wss://ecomerceagnet.duckdns.org"
+
+
 def _defaults() -> dict:
     return {
-        "server_url": "",  # ws://host:port hoặc wss://domain — hỏi lần đầu chạy
+        "server_url": DEFAULT_SERVER_URL,  # để "" nếu muốn app hỏi lần đầu chạy
         "device_token": "",  # nhận sau pairing, app tự ghi
         "device_name": "",  # mặc định = tên máy (platform.node())
         "headless": False,  # mặc định HIỆN cửa sổ browser (khách thấy agent làm gì)
