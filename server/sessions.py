@@ -101,6 +101,21 @@ class SessionStore:
         rows = self._query("SELECT * FROM users WHERE invite_token = ?", (token,))
         return rows[0] if rows else None
 
+    def delete_user(self, user_id: str) -> None:
+        """Thu hồi user: xóa sạch user + device + sessions/messages/runs.
+        Invite link và device token lập tức vô hiệu ở lần auth kế tiếp."""
+        self._execute(
+            "DELETE FROM runs WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+            (user_id,),
+        )
+        self._execute(
+            "DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+            (user_id,),
+        )
+        self._execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        self._execute("DELETE FROM devices WHERE user_id = ?", (user_id,))
+        self._execute("DELETE FROM users WHERE id = ?", (user_id,))
+
     # --- devices (1 user 1 device — pair mới GHI ĐÈ device cũ, token cũ vô hiệu) ---
 
     def upsert_device(self, user_id: str, name: str) -> str:

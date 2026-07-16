@@ -6,6 +6,7 @@
 #         Playwright cần cấu trúc thư mục driver nguyên vẹn)
 #
 # Lưu ý phân phối cho tester:
+# - Copy Dang-nhap-trang-web.bat vào dist/PersonalAgent/ (helper --login cho khách)
 # - Zip cả thư mục dist/PersonalAgent/ gửi khách; khách giải nén, chạy PersonalAgent.exe
 # - Exe chưa ký code -> SmartScreen cảnh báo, khách bấm "More info" -> "Run anyway"
 #   (chấp nhận ở quy mô tester; ký code nằm ở backlog Phase 5)
