@@ -127,10 +127,11 @@ personal_agent/
 │   ├── remote_tools.py         #   build ToolRegistry stub (RPC) từ BROWSER_TOOL_SPECS
 │   ├── sessions.py             #   SessionStore: SQLite (users, devices, sessions, messages, runs)
 │   ├── pairing.py              #   pairing code in-memory (TTL 10 phút)
-│   ├── auth.py                 #   check invite_token / device_token
+│   │                           #   (auth check invite/device token gộp trong app.py — không có auth.py riêng)
 │   ├── config.py               #   env vars (bảng 3.4)
 │   ├── manage.py               #   CLI: add-user "Tên" → in invite link
-│   └── test_client.py          #   script test WS chat bằng tay
+│   ├── test_client.py          #   script test WS chat bằng tay
+│   └── fake_device.py          #   device giả lập (test RPC không cần app thật)
 ├── local-agent/                # Phase 2 — "tay" (companion app)
 │   ├── app.py                  #   entry: load config → pairing nếu chưa có token → WS loop
 │   ├── executor.py             #   nhận tool_call → gọi SyncBrowserTool → trả tool_result
@@ -140,10 +141,12 @@ personal_agent/
 │   └── build.spec              #   PyInstaller spec (Windows)
 ├── web/                        # Phase 3 — React SPA
 │   ├── src/
-│   │   ├── App.tsx
+│   │   ├── App.tsx             #   useReducer trung tâm xử lý mọi WS event
 │   │   ├── api/ws.ts           #   WS client + reconnect
+│   │   ├── api/rest.ts         #   REST client + invite token (localStorage)
 │   │   ├── components/         #   InviteGate, PairingPanel, DeviceBadge, Sidebar,
-│   │   │                       #   ChatView, MessageBubble, ProgressGroup, ToolCallRow, Composer
+│   │   │                       #   ChatView (kèm MessageBubble inline), Composer,
+│   │   │                       #   ProgressGroup (kèm ToolCallRow inline)
 │   │   └── types.ts            #   TS types mirror event schema (4.1)
 │   ├── package.json
 │   └── vite.config.ts
@@ -545,10 +548,10 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
 
 ### Các bước
 
-- [ ] **3.1** Scaffold: `npm create vite@latest web -- --template react-ts` + Tailwind + `react-markdown`. KHÔNG thêm gì khác.
-- [ ] **3.2** `types.ts`: mirror event schema 4.1 + protocol 4.2 thành TS types.
-- [ ] **3.3** `api/ws.ts`: WS client — đọc `?invite=` từ URL → lưu localStorage → xóa khỏi URL (`history.replaceState`); auth khi open; auto-reconnect backoff (1s→2s→4s, max 10s); expose `onEvent`.
-- [ ] **3.4** Components (Tailwind tự viết):
+- [x] **3.1** Scaffold: `npm create vite@latest web -- --template react-ts` + Tailwind + `react-markdown`. KHÔNG thêm gì khác.
+- [x] **3.2** `types.ts`: mirror event schema 4.1 + protocol 4.2 thành TS types.
+- [x] **3.3** `api/ws.ts`: WS client — đọc `?invite=` từ URL → lưu localStorage → xóa khỏi URL (`history.replaceState`); auth khi open; auto-reconnect backoff (1s→2s→4s, max 10s); expose `onEvent`. *(Thực tế: phần đọc `?invite=`/localStorage nằm trong `api/rest.ts` — `resolveInviteToken()`; `ws.ts` chỉ lo WS + auth + reconnect.)*
+- [x] **3.4** Components (Tailwind tự viết): *(Thực tế: `MessageBubble` inline trong `ChatView.tsx`, `ToolCallRow` inline trong `ProgressGroup.tsx` — không tách file riêng.)*
   - `InviteGate`: không có token trong localStorage lẫn URL → màn hình "Liên hệ để nhận link mời" (+ ô dán link dự phòng). Token sai (`auth_failed`) → xóa token, hiện lại màn này.
   - `DeviceBadge`: góc màn hình — chấm xanh "Máy đã kết nối: <tên>" / đỏ "Máy chưa kết nối" (từ `device_status`).
   - `PairingPanel`: hiện khi user chưa có device hoặc bấm "Ghép máy mới": hướng dẫn tải app + ô nhập mã 6 số → POST `/api/pair/complete` → cập nhật badge.
@@ -556,9 +559,9 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
   - `ChatView`: 3 loại item — user message, assistant message (react-markdown), `ProgressGroup`.
   - `ProgressGroup`: gom event 1 run — mỗi `tool_call` 1 dòng `ToolCallRow` (spinner → ✓ khi có `tool_result`; click mở args/result preview); event `agent != "main"` nhóm vào sub-block `🤖 <subagent>`; có `final_answer` → group tự thu gọn.
   - `Composer`: textarea, Enter gửi / Shift+Enter xuống dòng, disable khi đang chạy, nút "Dừng" (gửi `cancel`).
-- [ ] **3.5** State: 1 `useReducer` trong `App.tsx` xử lý mọi WS event. Không context lồng nhau.
-- [ ] **3.6** UX bắt buộc: auto-scroll khi có event mới (trừ khi user đang cuộn lên); chỉ báo kết nối WS; khi task cần device mà badge đỏ → banner nhắc mở app.
-- [ ] **3.7** Build: `npm run build` → `web/dist`; xác nhận FastAPI serve, WS cùng origin OK.
+- [x] **3.5** State: 1 `useReducer` trong `App.tsx` xử lý mọi WS event. Không context lồng nhau.
+- [x] **3.6** UX bắt buộc: auto-scroll khi có event mới (trừ khi user đang cuộn lên); chỉ báo kết nối WS; khi task cần device mà badge đỏ → banner nhắc mở app.
+- [x] **3.7** Build: `npm run build` → `web/dist`; xác nhận FastAPI serve, WS cùng origin OK.
 
 ### Definition of Done
 - Flow trọn vẹn trên máy dev: mở link invite → pairing với app → chat "tìm giá bitcoin" → thấy từng tool call hiện realtime trong block browser-agent, cửa sổ Chrome bật lên trên máy, kết quả markdown hiện ra.
