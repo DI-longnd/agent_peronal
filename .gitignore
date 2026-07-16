@@ -15,3 +15,6 @@ local-agent/build/
 
 # Config test local
 .test-agent-config/
+
+# Config deploy per-server (DOMAIN=...)
+docker/.env

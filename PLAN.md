@@ -573,11 +573,11 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
 
 **Mục tiêu**: `docker compose up -d` trên server Linux có sẵn (4GB RAM) → product chạy trên domain HTTPS. Server KHÔNG cần Chromium → image nhẹ.
 
-**File tạo**: `docker/Dockerfile`, `docker/docker-compose.yml`, `docker/Caddyfile`, `.env.example` root, cập nhật `.gitignore` (`data/`).
+**File tạo**: `docker/Dockerfile`, `docker/docker-compose.yml`, `docker/Caddyfile`, `.env.example` root, `.dockerignore` root (chặn secret/.venv/node_modules lọt vào image), cập nhật `.gitignore` (`data/` đã có sẵn, thêm `docker/.env`).
 
 ### Các bước
 
-- [ ] **4.1** `Dockerfile` multi-stage:
+- [x] **4.1** `Dockerfile` multi-stage:
   ```dockerfile
   FROM node:20-slim AS web
   WORKDIR /build
@@ -595,9 +595,9 @@ def extract_from_markdown(payload: dict, query: str, llm) -> str           # syn
   CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
   ```
   (KHÔNG cài playwright trên server — Phase 0.3 đã đảm bảo import specs không cần nó.)
-- [ ] **4.2** `docker-compose.yml`: `app` (build, env_file `.env`, volume `./data:/app/data`, restart unless-stopped) + `caddy` (caddy:2, ports 80/443, volume Caddyfile + caddy_data).
-- [ ] **4.3** `Caddyfile`: `yourdomain.com { reverse_proxy app:8000 }` — Caddy tự lo Let's Encrypt (WS proxy tự động).
-- [ ] **4.4** Checklist server (ghi vào README):
+- [x] **4.2** `docker-compose.yml`: `app` (build, env_file `.env`, volume `./data:/app/data`, restart unless-stopped) + `caddy` (caddy:2, ports 80/443, volume Caddyfile + caddy_data). *(Đường dẫn trong compose viết tương đối thư mục `docker/` — `../.env`, `../data`.)*
+- [x] **4.3** `Caddyfile`: `{$DOMAIN} { reverse_proxy app:8000 }` — domain truyền qua env `DOMAIN` (đặt trong `docker/.env` khi deploy, mặc định `http://localhost` để test local không cần cấu hình). Caddy tự lo Let's Encrypt (WS proxy tự động).
+- [x] **4.4** Checklist server (ghi vào README):
   1. Dùng server Linux có sẵn (4GB RAM — dư dả vì không còn Chromium trên server).
   2. Cài docker + compose plugin; user thường; tắt SSH password.
   3. Trỏ DNS A record của domain → IP server. **Domain nào cũng được** (kể cả domain xấu/tạm — chốt sau). Đổi domain về sau chỉ cần: sửa `Caddyfile` + DNS + `server_url` trong config app của khách (hoặc build lại app với default mới) — không đụng code.

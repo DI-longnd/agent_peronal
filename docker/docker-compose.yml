@@ -1,0 +1,30 @@
+# Chạy từ root repo: docker compose -f docker/docker-compose.yml up -d --build
+# Đường dẫn tương đối trong file này resolve theo thư mục docker/.
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file: ../.env          # DEEPSEEK_API_KEY + config server (PLAN.md 3.4)
+    volumes:
+      - ../data:/app/data      # SQLite + memory/ sống ngoài container
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # cert Let's Encrypt — mất là bị rate-limit xin lại
+    environment:
+      # Local không cần gì (mặc định http://localhost). Deploy: tạo docker/.env
+      # chứa DOMAIN=yourdomain.com — Caddy tự lo HTTPS.
+      - DOMAIN=${DOMAIN:-http://localhost}
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy_data:

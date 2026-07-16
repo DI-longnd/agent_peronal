@@ -1,0 +1,14 @@
+# Giữ build context nhỏ + KHÔNG để secret/artifact lọt vào image
+.git
+.env
+data/
+web/node_modules/
+web/dist/
+agent-framework/.venv/
+agent-framework/.env
+local-agent/dist/
+local-agent/build/
+.test-ui/
+.test-agent-config/
+**/__pycache__/
+**/*.pyc

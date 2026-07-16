@@ -1,0 +1,6 @@
+# DOMAIN do docker-compose truyền vào (mặc định http://localhost để test local).
+# Deploy: đặt DOMAIN=yourdomain.com trong docker/.env — Caddy tự xin cert
+# Let's Encrypt, WS (/ws, /ws/device) proxy tự động, không cần cấu hình thêm.
+{$DOMAIN} {
+	reverse_proxy app:8000
+}
