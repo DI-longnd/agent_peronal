@@ -21,3 +21,6 @@ local-agent/build/
 
 # Config deploy per-server (DOMAIN=...)
 docker/.env
+
+# Test nhắm server thật — chứa invite token thật, KHÔNG commit (repo public)
+.test-ui/dod_remote_*
