@@ -7,6 +7,7 @@ CLI quản trị (chạy trên server): tạo user + invite link, xem danh sách
 """
 
 from __future__ import annotations
+import os
 import sys
 
 if sys.stdout.encoding != "utf-8":
@@ -43,8 +44,14 @@ def main() -> None:
             sys.exit(1)
         user = store.create_user(args[1])
         print(f"Đã tạo user: {user['name']} (id {user['id']})")
-        print(f"Invite link (local): http://localhost:{config.port}/?invite={user['invite_token']}")
-        print(f"Invite link (prod):  https://<domain>/?invite={user['invite_token']}")
+        # PUBLIC_URL đặt trong .env (vd https://ecomerceagnet.duckdns.org) để in
+        # link gửi thẳng cho khách — tránh ghép link tay dễ copy thiếu/thừa ký tự.
+        public_url = os.environ.get("PUBLIC_URL", "").rstrip("/")
+        if public_url:
+            print(f"Invite link (gửi cho khách): {public_url}/?invite={user['invite_token']}")
+        else:
+            print(f"Invite link (local): http://localhost:{config.port}/?invite={user['invite_token']}")
+            print(f"Invite link (prod):  https://<domain>/?invite={user['invite_token']}")
     elif args[0] == "revoke-user":
         if len(args) < 2:
             print("Thiếu đối số: python -m server.manage revoke-user <tên hoặc invite_token>")

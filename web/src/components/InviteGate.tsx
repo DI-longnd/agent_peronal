@@ -8,7 +8,9 @@ export default function InviteGate({ failed }: { failed: boolean }) {
   const [value, setValue] = useState('')
 
   const submit = () => {
-    const raw = value.trim()
+    // Xóa MỌI khoảng trắng (kể cả xuống dòng giữa chuỗi) — link copy từ
+    // terminal/chat hay bị wrap dòng làm token đứt đôi.
+    const raw = value.replace(/\s+/g, '')
     if (!raw) return
     // Chấp nhận cả link đầy đủ lẫn token trần
     try {
