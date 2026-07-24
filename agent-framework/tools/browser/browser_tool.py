@@ -23,13 +23,23 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import random
 import threading
 from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 
-from tools.browser.detector import ClickableElementDetector, filter_nested_elements, INTERACTIVE_SCAN_JS
+from tools.browser.detector import ClickableElementDetector, filter_nested_elements, INTERACTIVE_SCAN_JS, CAPTCHA_DETECT_JS
 from tools.browser.serializer import DOMSerializer
 from tools.browser.extract_action import ExtractAction, page_to_markdown
+
+
+# CHẶN CỨNG: nhãn nút mà agent KHÔNG được phép tự click vì đó là HÀNH ĐỘNG THẬT
+# gây hậu quả trên tài khoản người dùng (gửi lời mời hợp tác tới creator). Chặn ở
+# tầng tool để dù LLM có lỡ chọn nút này thì cũng không bao giờ thực thi được.
+# So khớp: nhãn (đã chuẩn hoá, viết thường) BẮT ĐẦU bằng 1 trong các tiền tố này
+# VÀ ngắn (nút, không phải cả hàng dữ liệu). Mở rộng qua tham số blocked_click_prefixes.
+DEFAULT_BLOCKED_CLICK_PREFIXES = ('mời', 'invite')
+_BLOCKED_LABEL_MAX_LEN = 30
 
 
 class BrowserTool:
@@ -41,6 +51,8 @@ class BrowserTool:
         max_elements: int = 100,
         viewport: dict | None = None,
         use_vision: bool = False,
+        delay_range: tuple[float, float] = (0.8, 2.4),
+        blocked_click_prefixes: tuple[str, ...] = DEFAULT_BLOCKED_CLICK_PREFIXES,
     ):
         self._llm = llm
         self.headless = headless
@@ -48,6 +60,10 @@ class BrowserTool:
         self.max_elements = max_elements
         self.viewport = viewport or {'width': 1280, 'height': 720}
         self.use_vision = use_vision
+        # Nghỉ ngẫu nhiên (giây) sau mỗi hành động tương tác — cho giống người dùng
+        # thật, giảm khả năng bị anti-bot của trang bật captcha vì thao tác quá đều/nhanh.
+        self.delay_range = delay_range
+        self._blocked_click_prefixes = tuple(p.lower() for p in blocked_click_prefixes)
 
         self._playwright = None
         self._browser = None
@@ -62,15 +78,57 @@ class BrowserTool:
         chỉ được TẠO bởi scripts/setup_browser_login.py (đăng nhập thủ công 1 lần,
         ngoài agent) — BrowserTool ở đây chỉ ĐỌC lại, không bao giờ tự đăng nhập."""
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        # Giảm dấu vết "trình duyệt tự động": --disable-blink-features=AutomationControlled
+        # tắt cờ navigator.webdriver + banner "đang bị điều khiển tự động". Nếu không,
+        # navigator.webdriver=true khiến anti-bot của TikTok phát captcha khó/không giải
+        # được (kéo đúng vẫn báo "Không thể xác minh").
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=['--disable-blink-features=AutomationControlled'],
+        )
 
         storage_state = (
             self.storage_state_path
             if self.storage_state_path and Path(self.storage_state_path).exists()
             else None
         )
-        self._context = await self._browser.new_context(viewport=self.viewport, storage_state=storage_state)
+        self._context = await self._browser.new_context(
+            viewport=self.viewport,
+            storage_state=storage_state,
+            locale='vi-VN',  # khớp người dùng Việt thật (navigator.languages + Accept-Language)
+        )
+        # Ẩn nốt các dấu hiệu tự động còn sót ở tầng JS (chạy trước mọi script của trang).
+        await self._context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            "Object.defineProperty(navigator, 'languages', {get: () => ['vi-VN','vi','en-US']});"
+        )
+        # Trang mở tab mới (window.open / target=_blank, vd click creator trên
+        # TikTok Affiliate mở trang chi tiết ở tab khác) -> tự chuyển sang tab mới
+        # nhất. Không có bước này, self._page kẹt ở tab cũ và agent tưởng click
+        # không ăn rồi lặp vô hạn.
+        self._context.on("page", self._on_new_page)
         self._page = await self._context.new_page()
+
+    def _on_new_page(self, page) -> None:
+        self._page = page
+
+    async def _reconcile_page(self) -> None:
+        """Đảm bảo self._page trỏ vào 1 tab còn sống và mới nhất (phòng khi tab
+        hiện tại bị đóng, hoặc event 'page' chưa kịp cập nhật)."""
+        pages = [p for p in self._context.pages if not p.is_closed()]
+        if not pages:
+            return
+        if self._page is None or self._page.is_closed() or self._page not in pages:
+            self._page = pages[-1]
+            try:
+                await self._page.wait_for_load_state("domcontentloaded", timeout=8000)
+            except Exception:
+                pass
+
+    async def _human_pause(self) -> None:
+        """Nghỉ ngẫu nhiên sau hành động tương tác (giống người, tránh anti-bot)."""
+        lo, hi = self.delay_range
+        await asyncio.sleep(random.uniform(lo, hi))
 
     async def save_storage_state(self, path: str) -> str:
         """Xuất cookie + localStorage hiện tại ra file JSON — dùng bởi
@@ -95,6 +153,7 @@ class BrowserTool:
         if new_tab:
             self._page = await self._context.new_page()
         await self._page.goto(url, wait_until='domcontentloaded', timeout=30000)
+        await self._human_pause()
         return f"Navigated to {self._page.url}"
 
     async def go_back(self) -> str:
@@ -116,6 +175,7 @@ class BrowserTool:
 
     # ========== DOM SCANNING ==========
     async def get_state(self, force_include_screenshot: bool | None = None) -> str | tuple[str, str | None]:
+        await self._reconcile_page()  # bám tab mới nhất (nếu vừa mở tab khác)
         await asyncio.sleep(0.1)  # Đợi DOM ổn định
 
         raw_elements = await self._page.evaluate(INTERACTIVE_SCAN_JS)
@@ -142,6 +202,17 @@ class BrowserTool:
         serializer = DOMSerializer(max_elements=self.max_elements)
         text, self._selector_map = serializer.serialize(filtered, url, title)
 
+        # Cảnh báo captcha lên đầu output — agent không có vision, nếu không báo
+        # thì nó không "thấy" lớp captcha che trang (captcha KHÔNG nằm trong danh
+        # sách interactive element) và sẽ thao tác mù, bấm loạn.
+        captcha = await self._captcha_hint()
+        if captcha:
+            text = (
+                "⚠️ PHÁT HIỆN CAPTCHA/XÁC MINH đang chặn trang (không tự giải/kéo được). "
+                "Hãy gọi browser__wait_for_human để chờ người dùng xử lý, rồi gọi lại "
+                "browser__get_state. TUYỆT ĐỐI không tự click/kéo để giải captcha.\n\n"
+            ) + text
+
         include_screenshot = force_include_screenshot if force_include_screenshot is not None else self.use_vision
 
         if not include_screenshot:
@@ -160,18 +231,34 @@ class BrowserTool:
                      coordinate_y: int | None = None) -> str:
         if coordinate_x is not None and coordinate_y is not None:
             await self._page.mouse.click(coordinate_x, coordinate_y)
+            await self._reconcile_page()
+            await self._human_pause()
             return f"Clicked at ({coordinate_x}, {coordinate_y})"
 
         if index not in self._selector_map:
             return f"Element [{index}] not found. Page may have changed. Call get_state() again."
 
         el = self._selector_map[index]
+
+        # CHẶN CỨNG nút Mời/Invite (hành động thật trên tài khoản) — xem hằng số ở đầu file.
+        label = (el.get('text') or '').strip().lower()
+        if label and len(label) <= _BLOCKED_LABEL_MAX_LEN and any(
+            label.startswith(p) for p in self._blocked_click_prefixes
+        ):
+            return (
+                f"TỪ CHỐI click [{index}] (\"{el.get('text', '')[:30]}\"): đây là nút Mời/Invite — "
+                "bị chặn ở tầng tool để tránh gửi lời mời hợp tác ngoài ý muốn tới creator. "
+                "Chỉ ĐỌC/trích xuất thông tin, KHÔNG thực hiện thao tác Mời."
+            )
+
         rect = el['rect']
         center_x = rect['x'] + rect['width'] / 2
         center_y = rect['y'] + rect['height'] / 2
 
         await self._page.mouse.click(center_x, center_y)
         await asyncio.sleep(0.3)
+        await self._reconcile_page()  # click có thể mở tab mới -> bám theo ngay
+        await self._human_pause()
 
         desc = el.get('text', '') or el.get('tag', 'element')
         return f"Clicked [{index}]: {desc[:50]}"
@@ -193,6 +280,7 @@ class BrowserTool:
             await asyncio.sleep(0.05)
 
         await self._page.keyboard.type(text, delay=20)
+        await self._human_pause()
 
         return f"Typed '{text[:30]}...' into [{index}]" if len(text) > 30 else f"Typed '{text}' into [{index}]"
 
@@ -200,16 +288,51 @@ class BrowserTool:
         dy = self.viewport['height'] * pages * (1 if direction == 'down' else -1)
         await self._page.evaluate(f'window.scrollBy(0, {dy})')
         await asyncio.sleep(0.2)
+        await self._human_pause()
         return f"Scrolled {'down' if direction == 'down' else 'up'} {pages} page(s)"
 
     async def press_key(self, key: str) -> str:
         await self._page.keyboard.press(key)
+        await self._reconcile_page()  # Enter có thể điều hướng/mở tab
+        await self._human_pause()
         return f"Pressed {key}"
 
     async def wait(self, seconds: int = 3) -> str:
         seconds = min(seconds, 30)
         await asyncio.sleep(seconds)
         return f"Waited {seconds}s"
+
+    # ========== HUMAN-IN-THE-LOOP (CAPTCHA) ==========
+    async def _captcha_hint(self) -> str:
+        """Trả mô tả captcha nếu có captcha đang chặn trang, rỗng nếu không."""
+        try:
+            return await self._page.evaluate(CAPTCHA_DETECT_JS)
+        except Exception:
+            return ''
+
+    async def wait_for_human(self, reason: str = "", timeout_seconds: int = 90) -> str:
+        """Tạm dừng cho NGƯỜI DÙNG tự xử lý captcha/xác minh trên cửa sổ browser
+        đang hiện — agent KHÔNG tự giải. Poll tới khi captcha biến mất hoặc hết giờ.
+        Cap < timeout RPC của server (120s) để trả kết quả sạch trước khi RPC timeout."""
+        timeout_seconds = max(5, min(int(timeout_seconds or 90), 100))
+        interval, waited = 1.5, 0.0
+        saw_captcha = bool(await self._captcha_hint())
+        while waited < timeout_seconds:
+            await asyncio.sleep(interval)
+            waited += interval
+            hint = await self._captcha_hint()
+            if hint:
+                saw_captcha = True
+            elif saw_captcha:
+                return (f"Người dùng đã xử lý xong xác minh sau ~{int(waited)}s. "
+                        "Gọi browser__get_state để tiếp tục.")
+            elif waited >= 4:
+                # Không hề thấy captcha sau vài giây — có thể agent gọi nhầm hoặc
+                # trang chỉ tải chậm; khỏi bắt người dùng chờ vô ích.
+                return ("Không thấy captcha/xác minh đang chặn trang. Có thể trang chỉ "
+                        "tải chậm — gọi browser__get_state để kiểm tra lại.")
+        return (f"Đã chờ {int(waited)}s nhưng xác minh vẫn chưa hoàn tất. Nhờ người dùng "
+                "kéo/hoàn tất xác minh trên cửa sổ Chrome đang mở rồi gọi browser__get_state lại.")
 
     # ========== EXTRACTION ==========
     async def extract(self, query: str, extract_links: bool = False, start_from_char: int = 0) -> str:
@@ -249,6 +372,7 @@ class BrowserTool:
         await self._page.keyboard.press('Control+a')
         await asyncio.sleep(0.05)
         await self._page.keyboard.type(value, delay=20)
+        await self._human_pause()
 
         return f"Typed sensitive value '{placeholder}' into [{index}]"
 
@@ -326,6 +450,9 @@ class SyncBrowserTool:
 
     def wait(self, seconds: int = 3) -> str:
         return self._loop_thread.run(self._tool.wait(seconds))
+
+    def wait_for_human(self, reason: str = "", timeout_seconds: int = 90) -> str:
+        return self._loop_thread.run(self._tool.wait_for_human(reason, timeout_seconds))
 
     def extract(self, query: str, extract_links: bool = False, start_from_char: int = 0) -> str:
         return self._loop_thread.run(self._tool.extract(query, extract_links, start_from_char))

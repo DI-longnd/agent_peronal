@@ -45,7 +45,10 @@ def load_config() -> Config:
         llm_model=os.environ.get("LLM_MODEL", "deepseek-chat"),
         data_dir=data_dir,
         max_concurrent_runs=int(os.environ.get("MAX_CONCURRENT_RUNS", "3")),
-        run_timeout_seconds=int(os.environ.get("RUN_TIMEOUT_SECONDS", "300")),
+        # 600s (10 phút): tra danh sách nhiều creator tuần tự + delay giống người
+        # tốn ~80s/tên, nên lô ~5 tên cần tới ~400-500s mới trọn. Task đơn lẻ vẫn
+        # kết thúc sớm khi xong (đây chỉ là trần), nên nới không hại gì.
+        run_timeout_seconds=int(os.environ.get("RUN_TIMEOUT_SECONDS", "600")),
         tool_call_timeout_seconds=int(os.environ.get("TOOL_CALL_TIMEOUT_SECONDS", "120")),
         port=int(os.environ.get("PORT", "8000")),
     )

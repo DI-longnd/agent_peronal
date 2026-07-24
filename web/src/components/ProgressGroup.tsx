@@ -13,6 +13,7 @@ const TOOL_LABELS: Record<string, string> = {
   browser__press_key: 'Nhấn phím',
   browser__go_back: 'Quay lại',
   browser__wait: 'Chờ trang tải',
+  browser__wait_for_human: '⏳ Chờ bạn xử lý xác minh trên cửa sổ Chrome',
   browser__type_sensitive: 'Nhập thông tin bảo mật',
   read_skill: 'Đọc hướng dẫn nghiệp vụ',
   run_skill_script: 'Chạy nghiệp vụ',

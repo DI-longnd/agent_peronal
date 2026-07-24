@@ -151,7 +151,7 @@ BROWSER_TOOL_SPECS: list[dict] = [
             },
         },
         "method": "scroll",
-        "defer_loading": True,
+        "defer_loading": False,  # thao tác duyệt web cơ bản -> luôn sẵn cho agent
     },
     {
         "name": "browser__press_key",
@@ -162,7 +162,7 @@ BROWSER_TOOL_SPECS: list[dict] = [
             "required": ["key"],
         },
         "method": "press_key",
-        "defer_loading": True,
+        "defer_loading": False,  # nhấn Enter sau khi gõ tìm kiếm là thao tác rất hay dùng
     },
     {
         "name": "browser__wait",
@@ -172,7 +172,27 @@ BROWSER_TOOL_SPECS: list[dict] = [
             "properties": {"seconds": {"type": "integer", "default": 3}},
         },
         "method": "wait",
-        "defer_loading": True,
+        "defer_loading": False,  # trang SPA tải chậm -> chờ là thao tác cơ bản
+    },
+    {
+        # KHÔNG defer: đây là fallback quan trọng, agent phải luôn biết nó tồn tại
+        # để gọi ngay khi get_state báo có captcha (agent không có vision).
+        "name": "browser__wait_for_human",
+        "description": (
+            "Tạm dừng cho NGƯỜI DÙNG tự xử lý xác minh/CAPTCHA (vd captcha kéo của TikTok) "
+            "trên cửa sổ trình duyệt đang hiện. Gọi tool này khi browser__get_state báo phát "
+            "hiện captcha, hoặc khi trang không phản hồi đúng sau thao tác hợp lệ. TUYỆT ĐỐI "
+            "KHÔNG tự click/kéo để giải captcha. Tool tự chờ tới khi xác minh xong rồi báo tiếp tục."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "Lý do cần người xử lý (để hiển thị cho user)"},
+                "timeout_seconds": {"type": "integer", "default": 90, "description": "Tối đa ~100s"},
+            },
+        },
+        "method": "wait_for_human",
+        "defer_loading": False,
     },
     {
         "name": "browser__type_sensitive",

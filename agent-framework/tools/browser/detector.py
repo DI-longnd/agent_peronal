@@ -198,46 +198,57 @@ INTERACTIVE_SCAN_JS = """
     ].join(',');
 
     const results = [];
-    const all = document.querySelectorAll(SELECTORS);
+    const seen = new Set();
+    const important_attrs = [
+        'type', 'name', 'placeholder', 'value', 'role',
+        'aria-label', 'href', 'title', 'checked', 'disabled',
+        'aria-expanded', 'aria-checked', 'aria-pressed', 'aria-disabled',
+    ];
 
-    for (const el of all) {
+    const consider = (el, viaPointer) => {
+        if (seen.has(el)) return;
         const rect = el.getBoundingClientRect();
         const style = getComputedStyle(el);
 
-        if (rect.width === 0 || rect.height === 0) continue;
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
-        if (parseFloat(style.opacity) === 0) continue;
+        if (rect.width === 0 || rect.height === 0) return;
+        if (style.display === 'none' || style.visibility === 'hidden') return;
+        if (parseFloat(style.opacity) === 0) return;
 
-        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
-        if (rect.right < 0 || rect.left > window.innerWidth) continue;
+        if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+        if (rect.right < 0 || rect.left > window.innerWidth) return;
+
+        // Pass 2 (cursor:pointer): bỏ container gần kín viewport — đó thường là
+        // lớp wrapper, không phải phần tử bấm thật.
+        if (viaPointer && rect.width > window.innerWidth * 0.9 && rect.height > window.innerHeight * 0.5) return;
 
         let text = '';
-        if (el.tagName === 'A' || el.tagName === 'BUTTON') {
-            text = (el.textContent || '').trim().slice(0, 100);
-        } else if (el.tagName === 'INPUT') {
+        if (el.tagName === 'INPUT') {
             text = el.value || el.placeholder || '';
+        } else if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') {
+            text = el.value || '';
+        } else {
+            // Lấy nhãn cho MỌI element tương tác (kể cả <div role=menuitem>),
+            // không chỉ a/button — nếu không, sidebar/menu dạng div sẽ rỗng chữ,
+            // LLM không phân biệt được các mục nên bấm nhầm và điều hướng loạn.
+            text = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 100);
         }
 
+        // Pass 2 chỉ giữ element CÓ CHỮ (hoặc ảnh có alt) — div/span pointer rỗng
+        // chữ là rác thuần, làm dài danh sách và khiến LLM (không vision) rối.
+        if (viaPointer && !text && !(el.tagName === 'IMG' && el.getAttribute('alt'))) return;
+
+        seen.add(el);
+
         const attrs = {};
-        const important_attrs = [
-            'type', 'name', 'placeholder', 'value', 'role',
-            'aria-label', 'href', 'title', 'checked', 'disabled',
-            'aria-expanded', 'aria-checked', 'aria-pressed', 'aria-disabled',
-        ];
         for (const attr of important_attrs) {
-            if (el.hasAttribute(attr)) {
-                attrs[attr] = el.getAttribute(attr);
-            }
+            if (el.hasAttribute(attr)) attrs[attr] = el.getAttribute(attr);
         }
 
         results.push({
             tag: el.tagName.toLowerCase(),
             text: text,
             attributes: attrs,
-            rect: {
-                x: rect.x, y: rect.y,
-                width: rect.width, height: rect.height,
-            },
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             computed_styles: {
                 display: style.display,
                 visibility: style.visibility,
@@ -245,8 +256,50 @@ INTERACTIVE_SCAN_JS = """
                 cursor: style.cursor,
             },
         });
+    };
+
+    // Pass 1: các selector tương tác chuẩn.
+    for (const el of document.querySelectorAll(SELECTORS)) consider(el, false);
+
+    // Pass 2: element chỉ có cursor:pointer (React onClick trên div/span KHÔNG có
+    // role/tabindex/onclick attribute -> pass 1 bỏ sót, vd hàng kết quả creator
+    // trên TikTok Affiliate). Quét giới hạn để không chậm trên trang lớn.
+    let scanned = 0;
+    for (const el of document.querySelectorAll('div,span,li,td,img')) {
+        if (scanned++ > 4000) break;
+        if (seen.has(el)) continue;
+        let cur;
+        try { cur = getComputedStyle(el).cursor; } catch (e) { continue; }
+        if (cur === 'pointer') consider(el, true);
     }
 
     return results.slice(0, 200);
+}
+"""
+
+
+# Phát hiện captcha/xác minh ĐANG CHẶN trang (vd captcha kéo của TikTok, dùng
+# SDK 'oec-ttweb-captcha'/'secsdk-captcha'). Trả về chuỗi mô tả (id/class) nếu
+# có, rỗng nếu không. Điều kiện chặt để tránh báo nhầm: element phải (1) có
+# id/class chứa token captcha, (2) đang hiện thật (display/visibility/opacity),
+# (3) đủ lớn (>=40px mỗi chiều) — loại script loader kích thước 0 và badge nhỏ.
+# LƯU Ý: danh sách token dựa trên quy ước đặt tên captcha của TikTok; nếu về sau
+# quan sát được biến thể captcha khác, bổ sung token vào đây.
+CAPTCHA_DETECT_JS = """
+() => {
+    const TOKENS = ['captcha', 'secsdk-captcha', 'captcha_verify', 'captcha-verify'];
+    for (const el of document.querySelectorAll('div,iframe,section,main')) {
+        const id = el.id || '';
+        const cls = (typeof el.className === 'string' ? el.className : '') || '';
+        const hay = (id + ' ' + cls).toLowerCase();
+        if (!TOKENS.some(t => hay.includes(t))) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 40 || r.height < 40) continue;
+        const st = getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') continue;
+        if (parseFloat(st.opacity || '1') === 0) continue;
+        return (id || cls).slice(0, 80);
+    }
+    return '';
 }
 """

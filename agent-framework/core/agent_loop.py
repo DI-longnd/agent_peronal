@@ -28,7 +28,7 @@ from tools.registry import ToolRegistry
 from tools.tool_search import tool_search, TOOL_SEARCH_SCHEMA
 from tools.skill_loader import SkillLoader, READ_SKILL_SCHEMA, RUN_SKILL_SCRIPT_SCHEMA
 
-MAX_ITERATIONS = 20
+MAX_ITERATIONS = 35
 PREVIEW_MAX_CHARS = 500
 
 
@@ -187,4 +187,9 @@ class AgentLoop:
                 )
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
 
-        return "Đã đạt giới hạn số bước lặp (MAX_ITERATIONS) mà chưa xong task."
+        return (
+            "Đã đạt giới hạn số bước lặp (MAX_ITERATIONS) trước khi hoàn tất — đây KHÔNG "
+            "hẳn là thất bại và KHÔNG có nghĩa là chưa đăng nhập (chỉ kết luận 'chưa đăng "
+            "nhập' nếu thực sự thấy form đăng nhập). Thường do trang SPA tải chậm hoặc gặp "
+            "captcha/xác minh. Hãy tóm tắt dữ liệu ĐÃ thu được (nếu có) và nêu bước còn dở."
+        )
