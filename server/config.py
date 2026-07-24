@@ -42,7 +42,7 @@ def load_config() -> Config:
     return Config(
         deepseek_api_key=api_key,
         llm_base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
-        llm_model=os.environ.get("LLM_MODEL", "deepseek-chat"),
+        llm_model=os.environ.get("LLM_MODEL", "deepseek-v4-pro"),
         data_dir=data_dir,
         max_concurrent_runs=int(os.environ.get("MAX_CONCURRENT_RUNS", "3")),
         # 600s (10 phút): tra danh sách nhiều creator tuần tự + delay giống người
