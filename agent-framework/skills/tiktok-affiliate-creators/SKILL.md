@@ -58,12 +58,15 @@ creators", "Mời"="Invite"):
    MỚI — tool tự chuyển sang tab đó. `browser__wait` 2s rồi `browser__get_state`
    để xác nhận đã ở trang chi tiết (URL chứa `/creator/detail`, có các tab
    "Doanh số/Video/Người theo dõi...").
-7. Ở trang chi tiết, `browser__extract` với query: "Tên hiển thị, handle, số người
-   theo dõi, danh mục hàng, điểm đánh giá và số đánh giá, badge (vd Bán chạy nhất
-   Top 5), toàn bộ nội dung bio/giới thiệu (ĐẶC BIỆT số điện thoại/Hotline CSKH
-   nếu có), các link/thông tin liên hệ Zalo/email, và khối Doanh số: GMV, Số món
-   bán ra, GPM, GMV từ mỗi khách hàng".
-8. Trả về kết quả có cấu trúc cho tên này.
+7. Ở trang chi tiết, gọi `browser__extract` **ĐÚNG 1 LẦN** với query gộp lấy tất
+   cả field chính: "Tên hiển thị, handle, số người theo dõi, danh mục hàng, điểm
+   đánh giá, badge (vd Bán chạy nhất Top 5), bio/giới thiệu (ĐẶC BIỆT Hotline/SĐT
+   và link liên hệ Zalo/email nếu có), khối Doanh số (GMV, Số món bán ra, GPM, GMV
+   từ mỗi khách hàng), và chỉ số Video (lượt xem video trung bình, tỷ lệ tương tác)".
+   - Tab mặc định "Doanh số" đã hiển thị đủ các khối trên — CHỈ gọi extract 1 lần,
+     KHÔNG bấm sang tab khác (Video/Xu hướng...) và KHÔNG extract lại lần 2/3.
+   - Field nào không có trong kết quả extract → ghi `N/A`, không cố bấm thêm.
+8. Trả về kết quả có cấu trúc cho tên này (từ 1 lần extract ở trên).
 
 Main agent gom kết quả các tên rồi báo cáo theo Output format.
 

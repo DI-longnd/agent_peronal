@@ -12,9 +12,11 @@ __pycache__/
 web/node_modules/
 web/dist/
 
-# Companion app build (PyInstaller)
+# Companion app build (PyInstaller) — cả khi build từ local-agent/ lẫn từ root repo
 local-agent/dist/
 local-agent/build/
+/dist/
+/build/
 
 # Config test local
 .test-agent-config/

@@ -17,6 +17,7 @@ ExtractAction.extract (giữ nguyên chữ ký cũ để không phá code hiện
 
 from __future__ import annotations
 import json
+import re
 from markdownify import markdownify as md
 
 MAX_CHAR_LIMIT = 100000
@@ -26,9 +27,15 @@ async def page_to_markdown(page, start_from_char: int = 0) -> dict:
     """Nửa 'device': chụp nội dung chữ của trang. Trả dict JSON-serializable:
     {"url", "markdown" (≤ MAX_CHAR_LIMIT chars), "truncated", "next_start"}."""
     html = await page.content()
-    markdown = md(html, heading_style="ATX")
+    # strip=['img']: bỏ thẻ <img> khi chuyển sang markdown. Nhiều trang (vd TikTok
+    # Affiliate) nhúng ảnh/SVG dạng data:base64 RẤT lớn — chiếm ~90% kích thước
+    # markdown mà KHÔNG có giá trị cho việc trích xuất. Bỏ chúng giảm ~90% token
+    # gửi cho LLM (30K -> ~2-3K ký tự) mà vẫn giữ nguyên toàn bộ CHỮ (nhãn + giá trị).
+    markdown = md(html, heading_style="ATX", strip=["img"])
 
-    lines = [l for l in markdown.split("\n") if l.strip()]
+    # Lưới an toàn: bỏ ảnh markdown còn sót (![alt](...)) và mọi dòng chứa data: URI.
+    markdown = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", markdown)
+    lines = [l for l in markdown.split("\n") if l.strip() and "data:image" not in l]
     markdown = "\n".join(lines)
 
     total_len = len(markdown)
