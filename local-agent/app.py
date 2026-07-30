@@ -139,6 +139,21 @@ def main() -> None:
         save_config(cfg)
 
     ensure_chromium()
+
+    # Báo ngay tình trạng phiên đăng nhập web: hết hạn mà không biết thì agent sẽ
+    # thao tác trên trang đã đăng xuất và trả kết quả sai. Con số đọc từ bản sao
+    # lưu JSON — phiên THẬT nằm trong profile trình duyệt, nên đây là ước lượng
+    # (bản sao được làm tươi mỗi 2 phút trong lúc chạy).
+    from tools.browser import session_state
+
+    profile = cfg.get("user_data_dir")
+    print(f"Phiên đăng nhập web: {session_state.describe(cfg['storage_state_path'])}")
+    if profile:
+        print(f"  Profile trình duyệt: {profile}")
+    if session_state.load_for_context(cfg["storage_state_path"]) is None:
+        print("  → Nếu agent báo chưa đăng nhập: đóng app, chạy"
+              "  PersonalAgent --login https://affiliate.tiktok.com")
+
     executor = ToolExecutor(cfg)
     backoff = 2
     try:
