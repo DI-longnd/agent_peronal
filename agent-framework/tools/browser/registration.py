@@ -195,6 +195,59 @@ BROWSER_TOOL_SPECS: list[dict] = [
         "defer_loading": False,
     },
     {
+        # KHÔNG defer: skill xuất đơn hàng phụ thuộc hẳn vào tool này. Click thường
+        # cũng tải được file (đã có hook bắt download), nhưng agent sẽ không biết
+        # file về chưa/ở đâu — tool này chờ tải xong rồi trả đường dẫn thật.
+        "name": "browser__download_file",
+        "description": (
+            "Click 1 element [index] là nút/link TẢI FILE, rồi CHỜ file tải xong và trả về "
+            "đường dẫn file đã lưu trên máy người dùng. Dùng cho nút Tải xuống/Download/Xuất "
+            "của trang web. Nếu trang cần thời gian tạo file trước khi có nút tải (vd xuất đơn "
+            "hàng TikTok Shop), hãy chờ nút tải xuất hiện rồi mới gọi tool này vào đúng nút đó."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "minimum": 1},
+                "timeout_seconds": {"type": "integer", "default": 120, "description": "Tối đa ~110s"},
+            },
+            "required": ["index"],
+        },
+        "method": "download_file",
+        "defer_loading": False,
+    },
+    {
+        # Ghi tự động, agent không phải "bật" trước — lúc nhận ra cần xem thì
+        # request đã bay qua rồi.
+        "name": "browser__api_responses",
+        "description": (
+            "Xem các phản hồi API (JSON) mà trang web vừa nhận được. Dùng khi thao tác nào đó "
+            "chạy NGẦM ở phía server và giao diện chưa cập nhật — ví dụ bấm 'Xuất' rồi phải chờ "
+            "server tạo file: phản hồi API cho biết chính xác trạng thái và thường chứa sẵn link "
+            "tải. Đáng tin hơn nhiều so với dò lại giao diện bằng browser__get_state."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url_contains": {
+                    "type": "string",
+                    "description": "Lọc theo một đoạn trong URL API, vd 'export_record' hoặc 'order/export'",
+                },
+                "max_results": {"type": "integer", "default": 3},
+                "body_chars": {"type": "integer", "default": 1200, "description": "Số ký tự nội dung mỗi phản hồi"},
+            },
+        },
+        "method": "api_responses",
+        "defer_loading": False,
+    },
+    {
+        "name": "browser__list_downloads",
+        "description": "Liệt kê các file đã tải về máy người dùng trong phiên làm việc này (đường dẫn + dung lượng).",
+        "parameters": {"type": "object", "properties": {}},
+        "method": "list_downloads",
+        "defer_loading": True,
+    },
+    {
         "name": "browser__type_sensitive",
         "description": (
             "Gõ 1 giá trị NHẠY CẢM (mật khẩu, API key...) vào ô input theo [index]. "

@@ -24,13 +24,18 @@ import asyncio
 import base64
 import json
 import random
+import re
 import threading
+from collections import deque
+from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from tools.browser.detector import ClickableElementDetector, filter_nested_elements, INTERACTIVE_SCAN_JS, CAPTCHA_DETECT_JS
 from tools.browser.serializer import DOMSerializer
 from tools.browser.extract_action import ExtractAction, page_to_markdown
+from tools.browser import session_state
+from tools.browser.profile_lock import ProfileLock, ProfileInUse  # noqa: F401 (ProfileInUse re-export)
 
 
 # CHẶN CỨNG: nhãn nút mà agent KHÔNG được phép tự click vì đó là HÀNH ĐỘNG THẬT
@@ -41,6 +46,11 @@ from tools.browser.extract_action import ExtractAction, page_to_markdown
 DEFAULT_BLOCKED_CLICK_PREFIXES = ('mời', 'invite')
 _BLOCKED_LABEL_MAX_LEN = 30
 
+# Vòng đệm phản hồi API: số bản ghi giữ lại, và giới hạn kích thước body mỗi bản.
+API_LOG_SIZE = 40
+API_BODY_LIMIT = 4000        # ký tự lưu lại
+API_BODY_MAX_FETCH = 300_000  # body lớn hơn mức này thì bỏ qua, không đọc
+
 
 class BrowserTool:
     def __init__(
@@ -48,6 +58,8 @@ class BrowserTool:
         llm,
         headless: bool = False,
         storage_state_path: str | None = None,
+        user_data_dir: str | None = None,
+        downloads_dir: str | None = None,
         max_elements: int = 100,
         viewport: dict | None = None,
         use_vision: bool = False,
@@ -57,6 +69,12 @@ class BrowserTool:
         self._llm = llm
         self.headless = headless
         self.storage_state_path = storage_state_path
+        # Khi có user_data_dir -> dùng PROFILE CHROME THẬT trên đĩa thay vì
+        # chụp-lại-rồi-phục-dựng. Xem docstring start() để biết vì sao.
+        self.user_data_dir = user_data_dir
+        # Nơi cất file trang web tải về (vd Excel/CSV do TikTok Seller sinh ra khi
+        # xuất đơn hàng). Không đặt -> file tải về bị Playwright xoá khi đóng browser.
+        self.downloads_dir = downloads_dir
         self.max_elements = max_elements
         self.viewport = viewport or {'width': 1280, 'height': 720}
         self.use_vision = use_vision
@@ -67,50 +85,326 @@ class BrowserTool:
 
         self._playwright = None
         self._browser = None
+        self._profile_lock: ProfileLock | None = None
+        self._event_log = None
+        self._event_log_path = ''
+        self._nav_count = 0
+        self._snapshot_note = ''
+        self._downloads: list[dict] = []
+        # Trang nào đã gắn listener rồi — gắn 2 lần sẽ chạy handler 2 lần. Với
+        # download thì 2 handler cùng save_as vào MỘT đường dẫn = hỏng file.
+        self._dl_hooked: set = set()
+        self._log_hooked: set = set()
+        self._api_hooked: set = set()
+        # Vòng đệm phản hồi API. Ghi SẴN thay vì bắt agent "bật theo dõi" trước:
+        # lúc agent nhận ra cần xem phản hồi thì request đã bay qua từ lâu.
+        self._api_log: deque = deque(maxlen=API_LOG_SIZE)
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._selector_map: dict[int, dict] = {}
 
+    # Cờ chống dấu vết "trình duyệt tự động": tắt navigator.webdriver + banner
+    # "đang bị điều khiển tự động". Nếu không, anti-bot của TikTok phát captcha
+    # khó/không giải được (kéo đúng vẫn báo "Không thể xác minh").
+    # KHÔNG thêm init script "ẩn dấu vết" ở đây. Đo thực tế (4 cấu hình, cùng máy):
+    #   trơ trụi                -> navigator.webdriver = true            (lộ)
+    #   chỉ cờ này              -> navigator.webdriver = false           (giống Chrome thật)
+    #   cờ này + init script cũ -> navigator.webdriver = undefined, và navigator có
+    #                              OWN-property đọc ngược ra được "() => undefined",
+    #                              đồng thời navigator.languages lệch Accept-Language.
+    # Tức là init script biến một vân tay đã sạch thành vân tay GIẢ RÕ RÀNG. Riêng cờ
+    # launch là đủ; locale của context lo phần ngôn ngữ và giữ header khớp với JS.
+    _LAUNCH_ARGS = ['--disable-blink-features=AutomationControlled']
+
     # ========== LIFECYCLE ==========
     async def start(self):
-        """Nạp lại session đã đăng nhập từ storage_state_path (cookie + localStorage,
-        JSON gọn — KHÔNG phải toàn bộ profile Chromium) nếu file đã tồn tại. File này
-        chỉ được TẠO bởi scripts/setup_browser_login.py (đăng nhập thủ công 1 lần,
-        ngoài agent) — BrowserTool ở đây chỉ ĐỌC lại, không bao giờ tự đăng nhập."""
-        self._playwright = await async_playwright().start()
-        # Giảm dấu vết "trình duyệt tự động": --disable-blink-features=AutomationControlled
-        # tắt cờ navigator.webdriver + banner "đang bị điều khiển tự động". Nếu không,
-        # navigator.webdriver=true khiến anti-bot của TikTok phát captcha khó/không giải
-        # được (kéo đúng vẫn báo "Không thể xác minh").
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.headless,
-            args=['--disable-blink-features=AutomationControlled'],
-        )
+        """Mở browser ở 1 trong 2 chế độ lưu phiên đăng nhập:
 
-        storage_state = (
-            self.storage_state_path
-            if self.storage_state_path and Path(self.storage_state_path).exists()
-            else None
-        )
-        self._context = await self._browser.new_context(
-            viewport=self.viewport,
-            storage_state=storage_state,
-            locale='vi-VN',  # khớp người dùng Việt thật (navigator.languages + Accept-Language)
-        )
-        # Ẩn nốt các dấu hiệu tự động còn sót ở tầng JS (chạy trước mọi script của trang).
-        await self._context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-            "Object.defineProperty(navigator, 'languages', {get: () => ['vi-VN','vi','en-US']});"
-        )
+        A. user_data_dir (ƯU TIÊN) — profile Chrome thật trên đĩa. Chính Chromium
+           giữ cookie/localStorage/IndexedDB/service worker, và TỰ GHI LẠI mỗi khi
+           server cấp cookie mới. Đây là cách giữ phiên lâu nhất: không có bước
+           "chụp rồi phục dựng" nên không mất gì, và vân tay thiết bị ổn định qua
+           các lần chạy (trang không thấy 'máy lạ cầm đúng thẻ' mỗi lần mở).
+
+        B. storage_state_path — ảnh chụp JSON (cookie + localStorage). Gọn, chuyển
+           máy được, nhưng chỉ là ảnh chụp: thiếu IndexedDB (khoá device-binding
+           kiểu TikTok Ticket Guard) và mọi thứ trang cấp thêm sau đó đều phải tự
+           tay lưu lại. Giữ lại để tương thích ngược + làm bản sao lưu.
+
+        Cả hai: session đã HẾT HẠN thì không nạp (xem session_state) — nạp nửa vời
+        (cookie chết + localStorage còn cache 'đã đăng nhập') làm trang lặp reload."""
+        if self.user_data_dir:
+            # Giữ khoá TRƯỚC khi mở Chromium: đo thực tế cho thấy Chromium trên
+            # Windows vẫn mở bình thường khi 2 tiến trình trỏ vào cùng profile
+            # (trái với tài liệu Playwright), nên phải tự chặn — xem profile_lock.py.
+            lock = ProfileLock(self.user_data_dir)
+            lock.acquire()  # ném ProfileInUse kèm hướng dẫn nếu đang bị chiếm
+            self._profile_lock = lock
+
+        try:
+            await self._launch()
+        except Exception:
+            # Mở hụt thì phải NHẢ KHOÁ, nếu không profile bị treo cho tới khi
+            # thoát hẳn app và lần thử lại nào cũng báo "đang bị chiếm".
+            await self._release_profile_lock()
+            raise
+
+    async def _launch(self) -> None:
+        self._playwright = await async_playwright().start()
+
+        if self.user_data_dir:
+            try:
+                self._context = await self._playwright.chromium.launch_persistent_context(
+                    self.user_data_dir,
+                    headless=self.headless,
+                    args=self._LAUNCH_ARGS,
+                    viewport=self.viewport,
+                    locale='vi-VN',  # khớp người dùng Việt thật (navigator.languages + Accept-Language)
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Không mở được profile trình duyệt tại {self.user_data_dir}: {e}"
+                ) from e
+        else:
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.headless,
+                args=self._LAUNCH_ARGS,
+            )
+            storage_state = session_state.load_for_context(self.storage_state_path, log=print)
+            self._context = await self._browser.new_context(
+                viewport=self.viewport,
+                storage_state=storage_state,
+                locale='vi-VN',
+            )
+
         # Trang mở tab mới (window.open / target=_blank, vd click creator trên
         # TikTok Affiliate mở trang chi tiết ở tab khác) -> tự chuyển sang tab mới
         # nhất. Không có bước này, self._page kẹt ở tab cũ và agent tưởng click
         # không ăn rồi lặp vô hạn.
         self._context.on("page", self._on_new_page)
-        self._page = await self._context.new_page()
+        # Persistent context mở sẵn 1 tab — dùng lại, đừng tạo thêm tab trắng thừa.
+        existing = [p for p in self._context.pages if not p.is_closed()]
+        self._page = existing[0] if existing else await self._context.new_page()
+        for page in self._context.pages:
+            self._hook_downloads(page)
+            self._hook_api(page)
 
     def _on_new_page(self, page) -> None:
         self._page = page
+        self._hook_downloads(page)
+        self._hook_api(page)
+        if self._event_log is not None:
+            self._hook_event_log(page)
+
+    # ========== NGHE PHẢN HỒI API ==========
+    def _hook_api(self, page) -> None:
+        """Ghi lại phản hồi JSON của trang.
+
+        Vì sao cần: nhiều thao tác trên web thương mại điện tử là việc CHẠY NGẦM ở
+        phía server — bấm "Xuất" xong file chưa có ngay, phải chờ server tạo. Dò
+        giao diện để đoán "xong chưa" vừa chậm vừa dễ sai; đọc thẳng phản hồi API
+        thì biết chính xác trạng thái và thường có sẵn cả link tải.
+
+        Chỉ ĐỌC, không sửa/không tự gọi API — không đụng tới chữ ký request của trang."""
+        if page in self._api_hooked:
+            return
+        self._api_hooked.add(page)
+        page.on('response', lambda r: asyncio.create_task(self._record_api(r)))
+
+    async def _record_api(self, response) -> None:
+        try:
+            url = response.url
+            if '/api/' not in url and '/graphql' not in url:
+                return  # bỏ ảnh, css, js, tracking pixel...
+            ctype = (response.headers or {}).get('content-type', '')
+            if 'json' not in ctype.lower():
+                return
+            body = ''
+            try:
+                raw = await response.body()
+                if len(raw) <= API_BODY_MAX_FETCH:
+                    body = raw.decode('utf-8', errors='replace')[:API_BODY_LIMIT]
+            except Exception:
+                body = ''  # body đã bị giải phóng / redirect — vẫn ghi phần metadata
+            self._api_log.append({
+                'at': datetime.now().strftime('%H:%M:%S'),
+                'url': url,
+                'status': response.status,
+                'body': body,
+            })
+        except Exception:
+            pass  # nghe hụt 1 response không được phép làm chết browser
+
+    def api_responses(self, url_contains: str = '', max_results: int = 3,
+                      body_chars: int = 1200) -> str:
+        """Các phản hồi API đã ghi, mới nhất trước."""
+        hits = [h for h in self._api_log if url_contains.lower() in h['url'].lower()]
+        if not hits:
+            seen = len(self._api_log)
+            return (f"Chưa ghi được phản hồi API nào khớp '{url_contains}'. "
+                    f"(Đã ghi {seen} phản hồi khác trong phiên này.) "
+                    "Có thể trang chưa gọi API đó — chờ thêm rồi hỏi lại.")
+        out = [f"{len(hits)} phản hồi khớp '{url_contains}' (mới nhất trước):"]
+        for h in list(reversed(hits))[:max(1, max_results)]:
+            body = h['body'][:max(200, body_chars)]
+            links = self._urls_in(h['body'])
+            out.append(f"\n[{h['at']}] HTTP {h['status']} {h['url'][:160]}")
+            if links:
+                out.append("  Link tìm thấy trong phản hồi: " + " | ".join(links[:5]))
+            out.append(f"  Nội dung: {body}" + ("..." if len(h['body']) > len(body) else ""))
+        return "\n".join(out)
+
+    @staticmethod
+    def _urls_in(text: str) -> list[str]:
+        """Rút link http(s) trong body — thường là link tải file server vừa tạo xong."""
+        found = re.findall(r'https?:\\?/\\?/[^\s"\'<>,\\]{10,300}', text or '')
+        cleaned, seen = [], set()
+        for u in found:
+            u = u.replace('\\/', '/')
+            if u not in seen:
+                seen.add(u)
+                cleaned.append(u)
+        return cleaned
+
+    # ========== TẢI FILE VỀ MÁY ==========
+    def _hook_downloads(self, page) -> None:
+        """Bắt MỌI file trang web tải về và cất vào downloads_dir.
+
+        Bắt buộc phải tự lưu: Playwright cho file tải về vào thư mục tạm rồi XOÁ
+        khi đóng browser. Không lưu lại thì file khách xuất ra sẽ biến mất."""
+        if not self.downloads_dir or page in self._dl_hooked:
+            return
+        self._dl_hooked.add(page)
+        page.on('download', lambda d: asyncio.create_task(self._save_download(d)))
+
+    async def _save_download(self, download) -> None:
+        try:
+            folder = Path(self.downloads_dir)
+            folder.mkdir(parents=True, exist_ok=True)
+            name = download.suggested_filename or 'download.bin'
+            # Tiền tố thời gian: xuất 2 lần cùng ngày không đè lên nhau, và khách
+            # nhìn tên file biết ngay cái nào mới.
+            target = folder / f'{datetime.now():%Y%m%d-%H%M%S}-{name}'
+            await download.save_as(str(target))
+            size = target.stat().st_size if target.exists() else 0
+            self._downloads.append({
+                'path': str(target),
+                'name': name,
+                'size': size,
+                'at': datetime.now().strftime('%H:%M:%S'),
+            })
+            self._write_log('TAI', f'{target} ({size} bytes)')
+        except Exception as e:  # noqa: BLE001 - tải hụt không được làm chết browser
+            self._downloads.append({'path': '', 'name': 'LỖI', 'size': 0,
+                                    'error': f'{type(e).__name__}: {e}',
+                                    'at': datetime.now().strftime('%H:%M:%S')})
+
+    @staticmethod
+    def _describe_download(entry: dict) -> str:
+        if entry.get('error'):
+            return f"Tải file thất bại: {entry['error']}"
+        kb = entry['size'] / 1024
+        return (f"Đã tải xong \"{entry['name']}\" ({kb:.1f} KB) và lưu tại:\n{entry['path']}\n"
+                "File nằm trên máy này — mở thư mục đó là thấy.")
+
+    async def wait_for_download(self, timeout_seconds: int = 120) -> str:
+        """Chờ tới khi có 1 file được tải xong (dùng khi trang tự bắt đầu tải)."""
+        return await self._await_download(len(self._downloads), timeout_seconds)
+
+    async def download_file(self, index: int, timeout_seconds: int = 120) -> str:
+        """Click element [index] rồi chờ file tải xong — dùng cho nút Tải/Xuất."""
+        if not self.downloads_dir:
+            return "Máy này chưa cấu hình thư mục tải file, không nhận được file."
+        before = len(self._downloads)
+        click_result = await self.click(index)
+        if click_result.startswith('TỪ CHỐI') or 'not found' in click_result:
+            return click_result
+        result = await self._await_download(before, timeout_seconds)
+        return f"{click_result}\n{result}"
+
+    async def _await_download(self, before: int, timeout_seconds: int) -> str:
+        timeout_seconds = max(5, min(int(timeout_seconds or 120), 110))
+        waited, interval = 0.0, 0.5
+        while waited < timeout_seconds:
+            if len(self._downloads) > before:
+                return self._describe_download(self._downloads[-1])
+            await asyncio.sleep(interval)
+            waited += interval
+        return (f"Chờ {int(waited)}s mà chưa có file nào được tải về. "
+                "Có thể trang còn đang tạo file (xuất đơn hàng thường mất một lúc rồi mới "
+                "hiện nút tải trong mục lịch sử xuất) — hãy gọi browser__get_state để xem "
+                "trạng thái, rồi bấm đúng nút tải.")
+
+    def list_downloads(self) -> str:
+        if not self._downloads:
+            return "Chưa có file nào được tải về trong phiên này."
+        lines = [f"{len(self._downloads)} file đã tải về máy này:"]
+        for d in self._downloads:
+            lines.append(f"  [{d['at']}] {d.get('error') or d['path']} ({d['size']/1024:.1f} KB)")
+        return "\n".join(lines)
+
+    # ========== NHẬT KÝ CHẨN ĐOÁN ==========
+    def enable_event_log(self, path: str) -> None:
+        """Ghi lại điều hướng / lỗi console / HTTP lỗi ra file.
+
+        Dùng cho lúc đăng nhập thủ công: nếu trang rơi vào vòng lặp reload thì
+        cần biết nó nhảy qua những URL nào và server trả mã gì — ảnh chụp màn hình
+        console không đủ để kết luận. Không bật mặc định khi agent chạy (tốn I/O
+        và không có ai đọc)."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._event_log = open(path, 'a', encoding='utf-8')
+        self._event_log_path = path
+        self._nav_count = 0
+        self._write_log('BAT DAU', f'ghi nhat ky luc {datetime.now():%H:%M:%S}')
+        for page in self._context.pages:
+            self._hook_event_log(page)
+
+    def _write_log(self, kind: str, text: str) -> None:
+        if self._event_log is None:
+            return
+        try:
+            self._event_log.write(f'{datetime.now():%H:%M:%S.%f}  {kind:5} {text}\n')
+            self._event_log.flush()  # flush ngay: nếu treo/kill cứng vẫn còn dữ liệu
+        except (OSError, ValueError):
+            pass
+
+    def _hook_event_log(self, page) -> None:
+        if page in self._log_hooked:
+            return  # gắn 2 lần -> mỗi sự kiện ghi 2 dòng, đếm điều hướng sai gấp đôi
+        self._log_hooked.add(page)
+
+        def on_nav(frame) -> None:
+            if frame is page.main_frame:
+                self._nav_count += 1
+                self._write_log('NAV', f'#{self._nav_count} {frame.url[:200]}')
+
+        def on_console(msg) -> None:
+            if msg.type == 'error':
+                self._write_log('ERR', msg.text.replace('\n', ' ')[:300])
+
+        def on_response(resp) -> None:
+            if resp.status >= 400:
+                self._write_log('HTTP', f'{resp.status} {resp.url[:200]}')
+            elif 300 <= resp.status < 400:
+                # Redirect phía server KHÔNG kích hoạt framenavigated (Chromium chỉ
+                # báo URL cuối cùng), nên vòng lặp redirect sẽ vô hình nếu không ghi
+                # ở đây — mà đó chính là thứ cần chẩn đoán.
+                try:
+                    if resp.request.resource_type != 'document':
+                        return
+                    target = resp.headers.get('location', '')
+                except Exception:
+                    return
+                self._write_log('REDIR', f'{resp.status} {resp.url[:120]} -> {target[:120]}')
+
+        page.on('framenavigated', on_nav)
+        page.on('console', on_console)
+        page.on('response', on_response)
+
+    def event_log_summary(self) -> str:
+        if self._event_log is None:
+            return ''
+        return (f'{self._nav_count} lần điều hướng, nhật ký: {self._event_log_path}')
 
     async def _reconcile_page(self) -> None:
         """Đảm bảo self._page trỏ vào 1 tab còn sống và mới nhất (phòng khi tab
@@ -133,25 +427,83 @@ class BrowserTool:
     async def save_storage_state(self, path: str) -> str:
         """Xuất cookie + localStorage hiện tại ra file JSON — dùng bởi
         scripts/setup_browser_login.py sau khi người dùng đăng nhập thủ công.
-        Không phải tool cho agent gọi (không nằm trong registration.py)."""
+        Không phải tool cho agent gọi (không nằm trong registration.py).
+
+        Đọc thẳng từ context (KHÔNG cần page nào còn sống, cũng không cần reload
+        trang trước khi gọi) — nên vẫn lưu được kể cả khi người dùng đã đóng tab."""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        await self._context.storage_state(path=path)
-        return f"Saved storage state to {path}"
+        state = await self._snapshot(path=path)
+        # Xác nhận thứ vừa lưu có phiên đăng nhập thật, không phải file rỗng —
+        # tránh trường hợp người dùng tưởng đã lưu xong mà thực ra chưa login.
+        note = f"\n   Lưu ý: {self._snapshot_note}" if self._snapshot_note else ""
+        code, message = session_state.status(state)
+        if code in ('empty', 'expired'):
+            return f"⚠️  Đã ghi {path} nhưng KHÔNG có phiên đăng nhập hợp lệ: {message}{note}"
+        return f"Đã lưu phiên đăng nhập vào {path}\n   {message}{note}"
+
+    async def _snapshot(self, path: str | None = None) -> dict:
+        """storage_state, ưu tiên kèm IndexedDB nhưng KHÔNG chết nếu không kèm được.
+
+        Vì sao cố kèm: ByteDance giữ khoá ký gắn thiết bị (Ticket Guard) trong
+        IndexedDB chứ không phải cookie; bản chụp thiếu nó thì mỗi lần phục dựng
+        trang lại thấy như một máy khác đang cầm đúng cookie.
+
+        Vì sao phải có đường lùi: đo thực tế trên TikTok Seller, Playwright ném
+        "Unable to serialize IndexedDB: Database name is empty" — trang tạo một
+        IndexedDB tên rỗng mà bộ serialize của Playwright không xử lý được. Nếu
+        không lùi thì hỏng cả bản sao lưu, mất luôn thứ quan trọng hơn (cookie)."""
+        try:
+            state = await self._context.storage_state(path=path, indexed_db=True)
+            self._snapshot_note = ''
+            return state
+        except Exception as e:  # noqa: BLE001 - mất IndexedDB còn hơn mất cả bản sao lưu
+            self._snapshot_note = (
+                f'không kèm được IndexedDB ({str(e).splitlines()[0][:90]}) — '
+                'bản sao lưu chỉ có cookie + localStorage'
+            )
+            return await self._context.storage_state(path=path)
+
+    async def export_state(self) -> dict:
+        """Bản chụp session hiện tại, KHÔNG ghi ra đĩa — để caller tự quyết định
+        có nên đè lên file cũ hay không (xem session_state.should_persist)."""
+        return await self._snapshot()
+
+    async def _release_profile_lock(self) -> None:
+        if self._profile_lock is not None:
+            self._profile_lock.release()
+            self._profile_lock = None
 
     async def stop(self):
-        # Đóng context trước rồi mới đóng browser — đóng ngược lại có thể khiến
-        # context.close() thao tác trên browser đã chết.
-        if self._context:
-            await self._context.close()
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        # Persistent context: đóng context là đóng luôn browser (không có
+        # self._browser riêng). Ephemeral: đóng context trước rồi mới tới browser —
+        # ngược lại thì context.close() thao tác trên browser đã chết.
+        try:
+            if self._context:
+                await self._context.close()
+            if self._browser:
+                await self._browser.close()
+            if self._playwright:
+                await self._playwright.stop()
+        finally:
+            if self._event_log is not None:
+                self._write_log('KET THUC', f'tong {self._nav_count} lan dieu huong')
+                self._event_log.close()
+                self._event_log = None
+            # Nhả khoá kể cả khi đóng lỗi — bằng không lần chạy sau không mở nổi profile.
+            await self._release_profile_lock()
 
     # ========== NAVIGATION ==========
     async def navigate(self, url: str, new_tab: bool = False) -> str:
         if new_tab:
             self._page = await self._context.new_page()
+        else:
+            # Bám tab còn sống (như click/press_key/get_state). Thiếu bước này,
+            # nếu tab hiện tại đã bị đóng — trang tự mở tab mới rồi tab đó đóng,
+            # hoặc người dùng đóng tab trong lúc app chờ ở input() — thì goto ném
+            # TargetClosedError dù browser vẫn hoàn toàn khoẻ.
+            await self._reconcile_page()
+            if self._page is None or self._page.is_closed():
+                self._page = await self._context.new_page()
         await self._page.goto(url, wait_until='domcontentloaded', timeout=30000)
         await self._human_pause()
         return f"Navigated to {self._page.url}"
@@ -255,6 +607,10 @@ class BrowserTool:
         center_x = rect['x'] + rect['width'] / 2
         center_y = rect['y'] + rect['height'] / 2
 
+        mismatch = await self._target_moved(index, el, center_x, center_y)
+        if mismatch:
+            return mismatch
+
         await self._page.mouse.click(center_x, center_y)
         await asyncio.sleep(0.3)
         await self._reconcile_page()  # click có thể mở tab mới -> bám theo ngay
@@ -262,6 +618,37 @@ class BrowserTool:
 
         desc = el.get('text', '') or el.get('tag', 'element')
         return f"Clicked [{index}]: {desc[:50]}"
+
+    async def _target_moved(self, index: int, el: dict, x: float, y: float) -> str:
+        """Kiểm tra thứ đang NẰM DƯỚI toạ độ sắp bấm có đúng element mong muốn không.
+
+        Toạ độ lấy từ lần get_state trước; trang SPA reflow liên tục (đóng banner,
+        panel trượt ra, danh sách tải xong) nên toạ độ có thể đã trỏ vào chỗ khác.
+        Không kiểm tra thì cú click âm thầm rơi vào element khác — đúng kiểu lỗi
+        'agent bấm lung tung' rất khó truy vết. Thà báo lỗi để agent get_state lại."""
+        expect = (el.get('text') or '').strip()
+        if not expect:
+            return ''  # element không có nhãn -> không có gì để đối chiếu
+        try:
+            actual = await self._page.evaluate(
+                """([x, y]) => {
+                    const el = document.elementFromPoint(x, y);
+                    if (!el) return null;
+                    return (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
+                }""",
+                [x, y],
+            )
+        except Exception:
+            return ''  # không kiểm tra được thì cứ bấm, đừng chặn oan
+        if actual is None:
+            return (f"Không bấm [{index}]: vị trí của element không còn nằm trong vùng nhìn "
+                    "thấy. Gọi browser__get_state để lấy lại danh sách element.")
+        a, e = actual.lower(), expect.lower()[:120]
+        if a and (a in e or e in a):
+            return ''
+        return (f"KHÔNG bấm — trang đã thay đổi: chỗ định bấm giờ là \"{actual[:60]}\" "
+                f"chứ không phải \"{expect[:60]}\". Gọi browser__get_state để lấy lại "
+                "danh sách element rồi bấm theo index mới.")
 
     async def input_text(self, index: int, text: str, clear: bool = True) -> str:
         if index not in self._selector_map:
@@ -282,7 +669,34 @@ class BrowserTool:
         await self._page.keyboard.type(text, delay=20)
         await self._human_pause()
 
-        return f"Typed '{text[:30]}...' into [{index}]" if len(text) > 30 else f"Typed '{text}' into [{index}]"
+        # Đọc lại giá trị THẬT trong DOM. Nhiều ô ngày/tự-hoàn-thành nuốt text gõ
+        # vào (phải chọn trong lịch, hoặc phải Enter mới commit) — không kiểm tra
+        # thì agent tưởng đã điền xong và đi tiếp với bộ lọc RỖNG.
+        typed = await self._input_value(center_x, center_y)
+        shown = text if len(text) <= 30 else text[:30] + '...'
+        if typed is None:
+            return f"Typed '{shown}' into [{index}]"
+        if text not in typed:
+            return (f"Đã gõ '{shown}' vào [{index}] nhưng ô hiện đang là '{typed[:40]}' — "
+                    "text KHÔNG vào được ô. Ô này có thể cần chọn từ danh sách/lịch gợi ý, "
+                    "hoặc cần browser__press_key 'Enter' để xác nhận. Kiểm tra bằng "
+                    "browser__get_state trước khi đi tiếp.")
+        return f"Typed '{shown}' into [{index}] (ô hiện có: '{typed[:40]}')"
+
+    async def _input_value(self, x: float, y: float) -> str | None:
+        try:
+            return await self._page.evaluate(
+                """([x, y]) => {
+                    const el = document.elementFromPoint(x, y);
+                    if (!el) return null;
+                    const inp = el.matches('input, textarea') ? el
+                              : el.querySelector('input, textarea') || el.closest('input, textarea');
+                    return inp ? inp.value : null;
+                }""",
+                [x, y],
+            )
+        except Exception:
+            return None
 
     async def scroll(self, pages: float = 1.0, direction: str = 'down') -> str:
         dy = self.viewport['height'] * pages * (1 if direction == 'down' else -1)
@@ -465,3 +879,28 @@ class SyncBrowserTool:
 
     def save_storage_state(self, path: str) -> str:
         return self._loop_thread.run(self._tool.save_storage_state(path))
+
+    def export_state(self) -> dict:
+        return self._loop_thread.run(self._tool.export_state())
+
+    def download_file(self, index: int, timeout_seconds: int = 120) -> str:
+        return self._loop_thread.run(self._tool.download_file(index, timeout_seconds))
+
+    def wait_for_download(self, timeout_seconds: int = 120) -> str:
+        return self._loop_thread.run(self._tool.wait_for_download(timeout_seconds))
+
+    def list_downloads(self) -> str:
+        return self._tool.list_downloads()
+
+    def api_responses(self, url_contains: str = '', max_results: int = 3,
+                      body_chars: int = 1200) -> str:
+        return self._tool.api_responses(url_contains, max_results, body_chars)
+
+    def enable_event_log(self, path: str) -> None:
+        # Đăng ký listener phải chạy TRÊN event loop của browser, không phải thread gọi.
+        async def go():
+            self._tool.enable_event_log(path)
+        self._loop_thread.run(go())
+
+    def event_log_summary(self) -> str:
+        return self._tool.event_log_summary()

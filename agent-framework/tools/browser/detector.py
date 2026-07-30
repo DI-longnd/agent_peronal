@@ -199,6 +199,7 @@ INTERACTIVE_SCAN_JS = """
 
     const results = [];
     const seen = new Set();
+    const dupKeys = new Set();   // chữ + ô hình -> chặn các lớp bọc trùng nhau
     const important_attrs = [
         'type', 'name', 'placeholder', 'value', 'role',
         'aria-label', 'href', 'title', 'checked', 'disabled',
@@ -238,6 +239,18 @@ INTERACTIVE_SCAN_JS = """
         if (viaPointer && !text && !(el.tagName === 'IMG' && el.getAttribute('alt'))) return;
 
         seen.add(el);
+
+        // Gộp bản sao chồng khít NGAY TẠI ĐÂY, trước khi cắt danh sách. Một nút
+        // thường có 5-6 lớp bọc lồng nhau, lớp nào cũng lấy đúng textContent của
+        // nút và cùng ô hình. Đo thực tế trên TikTok Seller: hàng tab ngốn ~30
+        // suất cho 6 nhãn. Cắt ở 200 nên thứ nằm cuối DOM (popup lịch được gắn
+        // vào cuối body) không bao giờ tới lượt — agent không "thấy" ô ngày.
+        if (text) {
+            const key = text + '|' + Math.round(rect.x) + ',' + Math.round(rect.y)
+                             + ',' + Math.round(rect.width) + ',' + Math.round(rect.height);
+            if (dupKeys.has(key)) return;
+            dupKeys.add(key);
+        }
 
         const attrs = {};
         for (const attr of important_attrs) {

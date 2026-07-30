@@ -25,9 +25,41 @@ class DOMSerializer:
         self._counter = 0
         self._selector_map: dict[int, dict] = {}
 
+    @staticmethod
+    def _dedupe(elements: list[dict]) -> list[dict]:
+        """Bỏ các bản sao chồng khít nhau — cùng chữ, cùng ô hình.
+
+        Vì sao cần: một nút thường được bọc bởi nhiều lớp div/span lồng nhau, mỗi
+        lớp đều "tương tác được" và đều lấy đúng textContent của nút. Đo thực tế
+        trên TikTok Seller: nhãn tab 'Tất cả' xuất hiện 6 lần, tất cả tại cùng toạ
+        độ (253,462); riêng hàng tab đã ngốn ~30 trong 100 suất. Danh sách bị cắt ở
+        100 nên những thứ ở xa (ô ngày trong lịch) không bao giờ tới lượt.
+
+        Giữ bản ĐẦU TIÊN: thứ tự quét là ngoài-vào-trong, bản đầu là phần tử bao
+        ngoài cùng — vùng bấm rộng nhất, an toàn nhất khi click theo toạ độ tâm."""
+        seen: set[tuple] = set()
+        out = []
+        for el in elements:
+            text = (el.get('text') or '').strip()
+            r = el.get('rect') or {}
+            key = (
+                text,
+                el.get('tag') if not text else '',  # không chữ -> phân biệt thêm bằng tag
+                round(r.get('x', 0)), round(r.get('y', 0)),
+                round(r.get('width', 0)), round(r.get('height', 0)),
+            )
+            if text and key in seen:
+                continue
+            seen.add(key)
+            out.append(el)
+        return out
+
     def serialize(self, elements: list[dict], url: str, title: str) -> tuple[str, dict]:
         self._counter = 0
         self._selector_map = {}
+
+        elements = self._dedupe(elements)
+        total = len(elements)
 
         lines = []
         lines.append(f"URL: {url}")
@@ -40,6 +72,15 @@ class DOMSerializer:
             idx = self._counter
             self._selector_map[idx] = el
             lines.append(self._format_element(idx, el))
+
+        if total > self.max_elements:
+            # Cắt ÂM THẦM là bẫy: agent tưởng đã thấy hết trang và kết luận "không
+            # có nút đó", trong khi nút nằm ngay sau vạch cắt.
+            lines.append(
+                f"... (còn {total - self.max_elements} element nữa KHÔNG hiển thị ở đây. "
+                "Nếu không thấy thứ cần tìm, hãy thu hẹp phạm vi: cuộn tới đúng khu vực, "
+                "hoặc đóng bớt panel/popup đang mở rồi gọi lại browser__get_state.)"
+            )
 
         return '\n'.join(lines), self._selector_map
 
