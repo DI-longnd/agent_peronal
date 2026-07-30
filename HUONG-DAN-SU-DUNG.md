@@ -41,9 +41,22 @@ Agent dùng một trình duyệt riêng, sạch — nên cần đăng nhập Tik
 3. Cửa sổ Chrome mở ra → **đăng nhập tài khoản TikTok Shop của bạn** như bình
    thường (mật khẩu, OTP... đều được — thông tin chỉ lưu trên máy bạn, không
    gửi đi đâu).
-4. Đăng nhập xong, quay lại cửa sổ đen **bấm Enter** để lưu.
+4. Đăng nhập xong, **giữ nguyên cửa sổ Chrome đang mở**, quay lại cửa sổ đen
+   **bấm Enter** để lưu.
 
 > Làm tương tự với trang web khác nếu sau này cần agent thao tác trang đó.
+
+**Vài điều nên biết:**
+
+- **TikTok chỉ cho phiên đăng nhập sống khoảng 3 ngày.** Hết hạn thì làm lại Bước 4
+  này — app sẽ báo trước khi khởi động, ví dụ *"Phiên đăng nhập còn hiệu lực tới
+  02-08-2026 (còn 3.0 ngày)"*.
+- **Mỗi lúc chỉ mở một cửa sổ.** Đừng chạy `Dang-nhap-trang-web.bat` trong khi
+  `PersonalAgent.exe` đang chạy — app sẽ báo profile đang bị chiếm và không mở. Đóng
+  bớt rồi thử lại.
+- **Gặp ô "Xác minh để tiếp tục — Kéo mảnh ghép"?** TikTok bật xác minh này ngẫu
+  nhiên, kể cả với người thật. Bạn chỉ cần kéo mảnh ghép trên cửa sổ Chrome đang
+  hiện; agent tự chờ bạn rồi làm tiếp. Agent không tự giải, và không được phép giải.
 
 ---
 
@@ -62,6 +75,22 @@ Agent dùng một trình duyệt riêng, sạch — nên cần đăng nhập Tik
 4. Xong việc, agent trả về **bảng kết quả + khối CSV**. Bấm copy khối CSV → dán
    vào Excel là ra bảng (hoặc lưu thành file `.csv`).
 5. Muốn dừng giữa chừng: bấm nút **Dừng** cạnh ô chat.
+
+### Xuất file đơn hàng
+
+Ngoài tra creator, agent còn xuất được danh sách đơn hàng TikTok Shop ra file. Ví dụ:
+
+> Xuất đơn hàng TikTok Shop từ ngày 01/01/2026 đến 31/07/2026
+
+Khác với tra creator (kết quả hiện thẳng trên web), **file đơn hàng do TikTok tạo và
+tải về máy bạn** — agent sẽ báo đường dẫn, mặc định:
+
+```
+C:\Users\<tên bạn>\Downloads\PersonalAgent\
+```
+
+Tên file có mốc thời gian ở đầu nên xuất nhiều lần không đè lên nhau. Nhớ **nói rõ
+khoảng ngày**; không nói thì agent sẽ hỏi lại chứ không tự đoán.
 
 Mẹo:
 - Mỗi lần nên tra **tối đa 6-7 tên** — danh sách dài hơn thì chia làm nhiều lần.

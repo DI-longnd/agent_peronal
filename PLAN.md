@@ -206,10 +206,28 @@ Lưu ý: **server KHÔNG cần playwright/markdownify** để chạy (chỉ impo
   "device_token": "...",                   // nhận sau pairing, app tự ghi
   "device_name": "PC-cua-Long",
   "headless": false,                       // mặc định HIỆN cửa sổ browser
-  "storage_state_path": "<APPDATA>/PersonalAgent/state.json",
+  "user_data_dir": "<APPDATA>/PersonalAgent/browser-profile",  // NƠI LƯU PHIÊN CHÍNH
+  "storage_state_path": "<APPDATA>/PersonalAgent/state.json",  // chỉ là bản sao lưu
+  "downloads_dir": "<USERPROFILE>/Downloads/PersonalAgent",    // file trang web tải về
+  "viewport_width": 1280,
+  "viewport_height": 950,                  // panel trượt của TikTok Seller cao hơn 720
   "secrets": {"site_password": "..."}      // thay cho BROWSER_SECRET_* env — chỉ nằm máy khách
 }
 ```
+
+> **Cập nhật 31-07-2026 — thay đổi so với quyết định #10 ban đầu.** Kế hoạch gốc
+> chọn `storageState` (ảnh chụp JSON cookie+localStorage) thay vì profile Chromium,
+> với lý do gọn và chỉ chứa đúng phạm vi cần. Chạy thực tế cho thấy ảnh chụp có ba
+> lỗ hổng: (1) Playwright mặc định KHÔNG chụp IndexedDB, nơi ByteDance giữ khoá gắn
+> thiết bị (Ticket Guard), nên mỗi lần phục dựng trang lại thấy như một máy khác;
+> (2) mọi cookie trang cấp thêm trong lúc chạy đều mất khi đóng browser, đồng hồ hết
+> hạn không bao giờ được reset; (3) nạp ảnh chụp đã hết hạn tạo trạng thái mâu thuẫn
+> cookie-chết/localStorage-sống làm trang lặp reload vô tận.
+>
+> Nay **phiên chính nằm trong `user_data_dir`** (profile Chromium thật, Chromium tự
+> giữ và tự cập nhật), còn `storage_state_path` hạ xuống vai trò **bản sao lưu** —
+> vẫn hữu ích để chuyển máy và để đọc mốc cấp phiên. Chỉ một tiến trình được dùng
+> một profile tại một thời điểm; xem `tools/browser/profile_lock.py`.
 
 ---
 
