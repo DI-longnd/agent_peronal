@@ -116,6 +116,12 @@ class BrowserTool:
     # launch là đủ; locale của context lo phần ngôn ngữ và giữ header khớp với JS.
     _LAUNCH_ARGS = ['--disable-blink-features=AutomationControlled']
 
+    # Chặn profile phình vô hạn. Đo sau ~4 giờ dùng thật: profile 478MB, trong đó
+    # 221MB HTTP cache + 94MB JS code cache — toàn thứ vứt được, còn phần đáng giữ
+    # (IndexedDB chứa khoá gắn thiết bị) chỉ ~21MB. Chỉ áp cho profile trên đĩa;
+    # context tạm thì Chromium tự xoá khi đóng nên không cần.
+    _PERSISTENT_ARGS = ['--disk-cache-size=104857600']  # 100MB
+
     # ========== LIFECYCLE ==========
     async def start(self):
         """Mở browser ở 1 trong 2 chế độ lưu phiên đăng nhập:
@@ -157,7 +163,7 @@ class BrowserTool:
                 self._context = await self._playwright.chromium.launch_persistent_context(
                     self.user_data_dir,
                     headless=self.headless,
-                    args=self._LAUNCH_ARGS,
+                    args=self._LAUNCH_ARGS + self._PERSISTENT_ARGS,
                     viewport=self.viewport,
                     locale='vi-VN',  # khớp người dùng Việt thật (navigator.languages + Accept-Language)
                 )
