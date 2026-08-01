@@ -91,14 +91,84 @@ BROWSER_TOOL_SPECS: list[dict] = [
         "defer_loading": False,
     },
     {
+        "name": "browser__tiktok_creator_lookup",
+        "description": (
+            "TRA MỘT CREATOR TIKTOK AFFILIATE — CẢ LUỒNG TRONG MỘT LỜI GỌI. "
+            "Tự làm hết: mở trang tìm creator, gõ handle, Enter, mở trang chi tiết, "
+            "đọc số liệu thẳng từ API (giá trị GỐC, không phải chữ đã làm tròn trên "
+            "giao diện). Trả về follower, GMV, số món bán ra, GPM, GMV/khách, tỷ lệ "
+            "tương tác, hoa hồng, danh mục... \n"
+            "DÙNG TOOL NÀY THAY VÌ tự navigate/type/click từng bước: 7 bước đó không có "
+            "gì để bạn quyết định, làm thủ công tốn ~7 lượt gọi LLM cho cùng kết quả. "
+            "Chỉ quay lại thao tác từng bước khi tool này báo giao diện đã đổi. \n"
+            "Tool KHÔNG lấy bio/hotline/Zalo/badge (không có trong API) — kết quả sẽ "
+            "nói rõ creator có công khai liên hệ hay không để bạn biết có cần "
+            "browser__extract thêm hay không."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "handle": {"type": "string", "description": "Handle creator, vd 'nghiendecor.co.ltd'"},
+                "timeout_seconds": {"type": "integer", "default": 60},
+            },
+            "required": ["handle"],
+        },
+        "method": "tiktok_creator_lookup",
+        "defer_loading": False,
+    },
+    {
+        "name": "browser__click_label",
+        "description": (
+            "Bấm element theo NHÃN HIỂN THỊ (vd \"Xuất\", \"Tải xuống\", \"Áp dụng\") — "
+            "KHÔNG cần gọi browser__get_state trước. NHANH GẤP ĐÔI browser__click: tự quét "
+            "trang và tra chỉ số bằng code thay vì bắt bạn đọc danh sách element. "
+            "DÙNG TOOL NÀY khi đã biết chữ trên nút (skill có ghi, hoặc vừa thấy ở lượt trước). "
+            "Chỉ dùng browser__click + [index] khi phải tự dò trang lạ hoặc nút không có chữ. "
+            "Khớp chính xác trước, rồi mới khớp chứa; nhiều kết quả thì lấy nhãn ngắn nhất. "
+            "Không tìm thấy sẽ liệt kê các nhãn đang có trên trang."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"label": {"type": "string", "description": "Chữ hiện trên nút/link"}},
+            "required": ["label"],
+        },
+        "method": "click_label",
+        "defer_loading": False,
+    },
+    {
+        "name": "browser__type_label",
+        "description": (
+            "Gõ text vào ô nhập tìm theo NHÃN/placeholder (vd \"Tìm kiếm tên, sản phẩm\") — "
+            "KHÔNG cần browser__get_state trước. Đặt submit=true để bấm Enter luôn sau khi gõ: "
+            "gộp gõ + Enter vào MỘT lượt thay vì hai."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Placeholder hoặc nhãn của ô nhập"},
+                "text": {"type": "string"},
+                "submit": {"type": "boolean", "default": False,
+                           "description": "true = bấm Enter ngay sau khi gõ"},
+                "clear": {"type": "boolean", "default": True},
+            },
+            "required": ["label", "text"],
+        },
+        "method": "type_label",
+        "defer_loading": False,
+    },
+    {
         "name": "browser__type",
-        "description": "Gõ text vào ô input theo [index] lấy từ browser__get_state.",
+        "description": ("Gõ text vào ô input theo [index] lấy từ browser__get_state. "
+                        "Biết placeholder của ô thì dùng browser__type_label sẽ nhanh hơn. "
+                        "submit=true để bấm Enter luôn, gộp 2 lượt thành 1."),
         "parameters": {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "minimum": 1},
                 "text": {"type": "string"},
                 "clear": {"type": "boolean", "default": True, "description": "Xoá text cũ trước khi gõ"},
+                "submit": {"type": "boolean", "default": False,
+                           "description": "true = bấm Enter ngay sau khi gõ (đỡ 1 lượt gọi)"},
             },
             "required": ["index", "text"],
         },
@@ -248,6 +318,39 @@ BROWSER_TOOL_SPECS: list[dict] = [
             },
         },
         "method": "api_responses",
+        "defer_loading": False,
+    },
+    {
+        "name": "browser__api_json",
+        "description": (
+            "Lấy ĐÚNG vài trường từ JSON mà trang vừa nhận, thay vì đọc cả trang. "
+            "NHANH VÀ CHÍNH XÁC HƠN browser__extract cho SỐ LIỆU: extract phải nhờ LLM đọc "
+            "chữ trên trang rồi chép lại, còn tool này lấy thẳng giá trị thô từ API — "
+            "vd giao diện hiện '1,5K người theo dõi' nhưng JSON có đúng 1489. "
+            "Chỉ những trường bạn xin mới vào context, không phải cả JSON. "
+            "Tự gộp nhiều phản hồi cùng endpoint (trang hay chia dữ liệu làm nhiều lượt gọi). "
+            "Chưa biết tên trường thì xem browser__api_responses trước."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url_contains": {
+                    "type": "string",
+                    "description": "Một đoạn trong URL API, vd 'marketplace/profile'",
+                },
+                "fields": {
+                    "type": "string",
+                    "description": (
+                        "Các đường dẫn JSON ngăn bằng dấu phẩy, hỗ trợ chấm và chỉ số mảng. "
+                        "Vd: 'creator_profile.handle.value, creator_profile.gpm.value.format, "
+                        "creator_profile.industry_groups.value[0].name'"
+                    ),
+                },
+                "max_responses": {"type": "integer", "default": 8},
+            },
+            "required": ["url_contains", "fields"],
+        },
+        "method": "api_json",
         "defer_loading": False,
     },
     {

@@ -107,8 +107,19 @@ class SubagentDispatcher:
             return f"Không tìm thấy subagent '{subagent_name}'."
 
         if skill:
-            task = (f"{task}\n\nĐọc `read_skill(\"{skill}\")` trước khi bắt tay làm — "
-                    "quy trình chi tiết nằm trong đó.")
+            # NHÉT THẲNG nội dung skill vào lệnh giao việc, không bảo subagent tự
+            # read_skill: mỗi lần tự đọc tốn TRỌN một lượt gọi LLM (~6s với v4-pro)
+            # chỉ để phát ra một lời gọi tool mà nội dung đã biết chắc từ trước.
+            # Nạp bằng code thì tốn thêm ít token đầu vào — mà đo được là token đầu
+            # vào gần như không ảnh hưởng thời gian (prompt 2,4k -> 16k chỉ chậm
+            # thêm 1,7s), trong khi bỏ hẳn được một vòng LLM.
+            body = self._skills.read_skill(skill)
+            if body.startswith("Không tìm thấy skill"):
+                task = f"{task}\n\n(Lưu ý: {body})"
+            else:
+                task = (f"{task}\n\nLàm theo skill dưới đây. Nội dung đã nạp sẵn, "
+                        f"KHÔNG cần gọi read_skill nữa.\n\n"
+                        f"<skill name=\"{skill}\">\n{body}\n</skill>")
 
         prior = self._last_runs.get(subagent_name) if resume else None
         emit({"type": "subagent_started", "name": subagent_name,
@@ -160,6 +171,11 @@ class SubagentDispatcher:
         Bỏ system message: run() tự dựng lại system prompt mỗi lượt (danh sách
         skill/subagent có thể đã đổi), nhét thêm cái cũ vào là có hai system."""
         history = [m for m in sub_loop.last_messages if m.get("role") != "system"]
+        # Bảo hiểm: chuỗi không được MỞ ĐẦU bằng role='tool' (API đòi mỗi tool phải
+        # đứng sau assistant có tool_calls). compact() đã lo chỗ này, nhưng nếu sau
+        # này có đường nào khác cắt message thì đây là lưới chắn cuối.
+        while history and history[0].get("role") == "tool":
+            history.pop(0)
         self._last_runs[subagent_name] = (sub_loop, history)
 
     def _build_local_tools(self, subagent_name: str) -> ToolRegistry | str:
@@ -210,10 +226,15 @@ DISPATCH_SUBAGENT_SCHEMA = {
                 "resume": {
                     "type": "boolean",
                     "description": (
-                        "true = NÓI TIẾP vào lần giao việc trước cho subagent này thay vì làm "
-                        "lại từ đầu. Dùng khi kết quả gần đúng nhưng cần sửa/bổ sung — vd sai "
-                        "một mốc ngày, thiếu một trường. Lúc đó 'task' chỉ cần nêu chỗ cần sửa. "
-                        "Rẻ hơn nhiều lần giao lại toàn bộ, và subagent vẫn đang ở nguyên trang."
+                        "true = NÓI TIẾP vào lần giao việc trước cho subagent này. CHỈ dùng khi "
+                        "vẫn là CÙNG MỘT VIỆC: kết quả gần đúng cần sửa (sai mốc ngày, thiếu "
+                        "một trường), hoặc lần trước hết số bước giữa chừng. 'task' khi đó chỉ "
+                        "nêu chỗ cần sửa.\n"
+                        "TUYỆT ĐỐI KHÔNG dùng cho PHẦN TỬ TIẾP THEO của một danh sách. Mỗi mục "
+                        "phải là một lượt giao việc SẠCH (resume=false). Đo 01-08-2026: tra 3 "
+                        "creator bằng resume, tới người thứ 3 subagent nhìn thấy cả 3 tên trong "
+                        "context, tưởng mình phải làm hết danh sách nên quay lại tra lại người "
+                        "số 1 — 71 bước thay vì 40, hết số bước mà chưa xong."
                     ),
                 },
             },

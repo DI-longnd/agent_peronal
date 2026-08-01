@@ -71,12 +71,33 @@ class ContextManager:
             return actual_prompt_tokens > self._threshold
         return estimate_tokens(messages) > self._threshold
 
+    @staticmethod
+    def _safe_cut(rest: list[dict], keep_last_n: int) -> int:
+        """Chỉ số bắt đầu phần GIỮ LẠI, đã lùi ra khỏi giữa một nhóm tool call.
+
+        API bắt buộc mỗi message role='tool' phải đứng ngay sau assistant có
+        'tool_calls'. Cắt thẳng ở -keep_last_n rơi vào giữa nhóm được: một lượt gọi
+        4 tool sinh ra [assistant(tool_calls), tool, tool, tool, tool] — giữ 4 cái
+        cuối là được [tool, tool, tool, tool], mất đầu, chuỗi hỏng.
+
+        Đo thật 01-08-2026: lượt tra 3 creator chết ở phút 13 với
+        'Messages with role tool must be a response to a preceding message with
+        tool_calls', sau khi đã tiêu 624k token. Lỗi vốn có sẵn nhưng chỉ lộ ra khi
+        hạ ngưỡng nén (compact chạy thường hơn) — trước đó nó nén thưa nên may.
+
+        Lùi tới khi message đầu của phần giữ lại KHÔNG phải role='tool'."""
+        start = max(0, len(rest) - keep_last_n)
+        while start > 0 and rest[start].get("role") == "tool":
+            start -= 1
+        return start
+
     def compact(self, messages: list[dict], keep_last_n: int = 4) -> list[dict]:
         """Tóm tắt phần cũ, giữ nguyên system prompt + N message gần nhất."""
         system_msg = [m for m in messages if m["role"] == "system"]
         rest = [m for m in messages if m["role"] != "system"]
 
-        to_summarize, recent = rest[:-keep_last_n], rest[-keep_last_n:]
+        start = self._safe_cut(rest, keep_last_n)
+        to_summarize, recent = rest[:start], rest[start:]
         if not to_summarize:
             return messages
 

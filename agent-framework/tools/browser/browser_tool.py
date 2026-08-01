@@ -49,8 +49,16 @@ DEFAULT_BLOCKED_CLICK_PREFIXES = ('mời', 'invite')
 _BLOCKED_LABEL_MAX_LEN = 30
 
 # Vòng đệm phản hồi API: số bản ghi giữ lại, và giới hạn kích thước body mỗi bản.
-API_LOG_SIZE = 40
-API_BODY_LIMIT = 4000        # ký tự lưu lại
+_MISSING = object()  # phân biệt "không có trường" với "trường có giá trị None/rỗng"
+
+# Trang affiliate của TikTok bắn ~33 request API chỉ để dựng một trang. Để 40 thì
+# hàng đợi đầy ngay và phản hồi cần đọc bị đẩy ra trước khi kịp hỏi.
+API_LOG_SIZE = 80
+# Ký tự LƯU LẠI (khác với số ký tự HIỂN THỊ cho agent — chỗ đó do body_chars quyết
+# định). Trước để 4000, làm hụt thân phản hồi thật: trang chi tiết creator của TikTok
+# trả 7.143 ký tự nên các trường ở nửa sau bị cắt mất, browser__api_json không đọc
+# được. 40 bản ghi x 20.000 ký tự = ~800KB, chấp nhận được để đổi lấy JSON nguyên vẹn.
+API_BODY_LIMIT = 20_000
 API_BODY_MAX_FETCH = 300_000  # body lớn hơn mức này thì bỏ qua, không đọc
 
 
@@ -256,6 +264,91 @@ class BrowserTool:
             })
         except Exception:
             pass  # nghe hụt 1 response không được phép làm chết browser
+
+    @staticmethod
+    def _dig(obj, path: str):
+        """Lấy giá trị theo đường dẫn kiểu 'a.b[0].c'. Trả _MISSING nếu không có."""
+        cur = obj
+        for part in path.split('.'):
+            while part.endswith(']') and '[' in part:
+                part, _, idx = part[:-1].partition('[')
+                if part:
+                    if not isinstance(cur, dict) or part not in cur:
+                        return _MISSING
+                    cur = cur[part]
+                if not isinstance(cur, list):
+                    return _MISSING
+                try:
+                    cur = cur[int(idx)]
+                except (ValueError, IndexError):
+                    return _MISSING
+                part = ''
+            if not part:
+                continue
+            if not isinstance(cur, dict) or part not in cur:
+                return _MISSING
+            cur = cur[part]
+        return cur
+
+    def api_json(self, url_contains: str, fields: str, max_responses: int = 8) -> str:
+        """Bóc ĐÚNG các trường cần lấy từ phản hồi API đã ghi, không đọc cả trang.
+
+        Vì sao có tool này: browser__extract chuyển cả trang sang markdown rồi nhờ
+        LLM đọc — tốn một lượt gọi LLM, và con số phải đi qua khâu "đọc chữ rồi chép
+        lại". Trang thường đã có sẵn JSON với giá trị THÔ. Đo 01-08-2026 trên trang
+        chi tiết creator TikTok: giao diện hiện '1,5K' người theo dõi, JSON có
+        follower_cnt = 1489.
+
+        GỘP NHIỀU PHẢN HỒI: cùng một endpoint có thể được gọi vài lần với các mảng
+        dữ liệu khác nhau (TikTok chia trang creator thành 3 lượt: danh tính / video /
+        số liệu). Tool duyệt từ MỚI NHẤT về cũ, trường nào tìm thấy trước thì lấy.
+
+        fields: các đường dẫn ngăn bằng dấu phẩy, vd
+            "creator_profile.handle.value, creator_profile.gpm.value.format"
+        """
+        wanted = [f.strip() for f in fields.split(',') if f.strip()]
+        if not wanted:
+            return "Chưa nêu trường nào cần lấy (tham số 'fields')."
+        hits = [h for h in self._api_log if url_contains.lower() in h['url'].lower()]
+        if not hits:
+            return (f"Chưa ghi được phản hồi API nào khớp '{url_contains}'. "
+                    f"(Đã ghi {len(self._api_log)} phản hồi khác.) Có thể trang chưa gọi "
+                    "API đó — browser__wait vài giây rồi hỏi lại, hoặc dùng "
+                    "browser__api_responses để xem có những URL nào.")
+
+        found: dict[str, object] = {}
+        used, bad_json = [], 0
+        for h in list(reversed(hits))[:max(1, max_responses)]:
+            try:
+                data = json.loads(h['body'])
+            except Exception:
+                bad_json += 1  # body rỗng (quá lớn) hoặc bị cắt giữa chừng
+                continue
+            got = 0
+            for p in wanted:
+                if p in found:
+                    continue
+                v = self._dig(data, p)
+                if v is not _MISSING:
+                    found[p] = v
+                    got += 1
+            if got:
+                used.append(f"{h['url'].split('?')[0].split('/api/')[-1]} (+{got})")
+
+        out = [f"Đọc {len(found)}/{len(wanted)} trường từ {len(hits)} phản hồi khớp "
+               f"'{url_contains}'."]
+        if used:
+            out.append("Nguồn: " + " · ".join(used))
+        for p in wanted:
+            if p in found:
+                out.append(f"  {p} = {json.dumps(found[p], ensure_ascii=False)}")
+        missing = [p for p in wanted if p not in found]
+        if missing:
+            out.append("KHÔNG tìm thấy (trang có thể chưa tải xong, hoặc tên trường đã "
+                       "đổi — kiểm bằng browser__api_responses): " + ", ".join(missing))
+        if bad_json:
+            out.append(f"({bad_json} phản hồi không đọc được JSON — thân quá lớn nên bị bỏ.)")
+        return "\n".join(out)
 
     def api_responses(self, url_contains: str = '', max_results: int = 3,
                       body_chars: int = 1200) -> str:
@@ -686,6 +779,109 @@ class BrowserTool:
             return text, None
 
     # ========== INTERACTION ==========
+    async def tiktok_creator_lookup(self, handle: str, timeout_seconds: int = 60) -> str:
+        """Cả luồng tra 1 creator TikTok Affiliate trong MỘT lời gọi — xem
+        tools/browser/flows/tiktok_creator.py. Để riêng vì nó bám vào giao diện của
+        một trang cụ thể, còn file này phải dùng được cho mọi trang."""
+        from tools.browser.flows.tiktok_creator import creator_lookup
+        return await creator_lookup(self, handle, timeout_seconds)
+
+    # ===== Thao tác theo NHÃN (không cần hỏi LLM chỉ số) =====
+    #
+    # Vì sao có nhóm này: bấm một nút hiện tốn BA lượt —
+    #   get_state (2,9s) -> LLM đọc danh sách, chọn [index] (6s) -> click (2,3s)
+    # Nhưng khi skill đã ghi sẵn nhãn nút ("Xuất", ô "Tìm kiếm tên, sản phẩm...")
+    # thì lượt LLM ở giữa chẳng quyết định gì — nó chỉ tra xem nhãn đó đang mang số
+    # mấy. Việc tra đó làm bằng code được. Đo 01-08-2026: 11,2s -> ~5,2s mỗi thao tác.
+    #
+    # Đây là mức 1 trong thang tự chủ của Browserbase (chương trình điều khiển luồng,
+    # LLM chỉ xử lý chỗ thật sự cần suy nghĩ) — đúng loại việc cho một quy trình đã
+    # biết trước. Vẫn giữ nguyên click(index) cho lúc phải tự dò trang lạ.
+
+    _INPUT_TAGS = ('input', 'textarea', 'select')
+
+    @staticmethod
+    def _label_of(el: dict) -> str:
+        """Chữ để so khớp: text hiển thị, hoặc placeholder/aria-label với ô nhập.
+
+        CỐ TÌNH KHÔNG dùng thuộc tính `value`. Đo 01-08-2026: sau khi gõ handle vào
+        ô tìm kiếm, ô đó mang value="an_khanh_shop" và khớp CHÍNH XÁC — thắng cả hàng
+        kết quả (chỉ khớp chứa), nên click_label bấm vào chính cái ô vừa gõ. `value`
+        là NỘI DUNG người dùng nhập, không phải danh tính của element."""
+        text = (el.get('text') or '').strip()
+        if text:
+            return text
+        attrs = el.get('attributes') or {}
+        for k in ('placeholder', 'aria-label', 'title', 'name', 'alt'):
+            v = (attrs.get(k) or '').strip()
+            if v:
+                return v
+        return ''
+
+    def _match_label(self, label: str, tags: tuple[str, ...] | None = None,
+                     exclude_tags: tuple[str, ...] = ()):
+        """(index, el, thongbao_loi). Ưu tiên khớp CHÍNH XÁC, rồi đến chứa.
+
+        `label` nhận nhiều phương án ngăn bằng '|' — cần thiết vì TikTok tải giao
+        diện tiếng Anh trước rồi mới đổi sang tiếng Việt (đo được: giây thứ 3 còn
+        "Search creators", giây thứ 6 mới thành "Tìm kiếm tên, sản phẩm...").
+
+        Trong nhóm cùng hạng thì chọn nhãn NGẮN NHẤT: một nút thường nằm trong nhiều
+        lớp bọc, lớp ngoài gom cả chữ của hàng xóm nên nhãn dài hơn nhiều."""
+        wants = [w.strip().lower() for w in label.split('|') if w.strip()]
+        if not wants:
+            return None, None, "Chưa nêu nhãn cần tìm."
+        exact, partial = [], []
+        for idx, el in self._selector_map.items():
+            tag = (el.get('tag') or '').lower()
+            if tags and tag not in tags:
+                continue
+            if tag in exclude_tags:
+                continue
+            got = self._label_of(el).strip().lower()
+            if not got:
+                continue
+            if any(got == w for w in wants):
+                exact.append((len(got), idx, el))
+            elif any(w in got for w in wants):
+                partial.append((len(got), idx, el))
+        pool = exact or partial
+        if not pool:
+            near = sorted({self._label_of(e)[:40] for e in self._selector_map.values()
+                           if self._label_of(e)})[:25]
+            return None, None, (
+                f"Không thấy element nào có nhãn khớp \"{label}\". "
+                f"Nhãn đang có trên trang: {near}. "
+                "Kiểm lại chính tả, thử thêm phương án tiếng Anh ngăn bằng '|', "
+                "hoặc gọi browser__get_state để xem đầy đủ.")
+        pool.sort()
+        _, idx, el = pool[0]
+        return idx, el, ''
+
+    async def click_label(self, label: str) -> str:
+        """Bấm element theo NHÃN thay vì [index]. Tự quét lại trang trước khi bấm.
+
+        Bỏ qua ô nhập: cái cần bấm là nút/link/hàng kết quả, không bao giờ là ô
+        người dùng vừa gõ vào."""
+        await self.get_state()  # dựng lại _selector_map; chuỗi trả về bỏ đi
+        idx, el, err = self._match_label(label, exclude_tags=self._INPUT_TAGS)
+        if idx is None:
+            return err
+        result = await self.click(idx)
+        return f"(khớp nhãn \"{label}\" -> [{idx}]) {result}"
+
+    async def type_label(self, label: str, text: str, submit: bool = False,
+                         clear: bool = True) -> str:
+        """Gõ vào ô nhập tìm theo NHÃN (placeholder/aria-label)."""
+        await self.get_state()
+        idx, el, err = self._match_label(label, tags=('input', 'textarea'))
+        if idx is None:
+            idx, el, err = self._match_label(label)  # thử lại không giới hạn tag
+        if idx is None:
+            return err
+        result = await self.input_text(idx, text, clear=clear, submit=submit)
+        return f"(khớp nhãn \"{label}\" -> [{idx}]) {result}"
+
     async def click(self, index: int,
                      coordinate_x: int | None = None,
                      coordinate_y: int | None = None) -> str:
@@ -758,7 +954,8 @@ class BrowserTool:
                 f"chứ không phải \"{expect[:60]}\". Gọi browser__get_state để lấy lại "
                 "danh sách element rồi bấm theo index mới.")
 
-    async def input_text(self, index: int, text: str, clear: bool = True) -> str:
+    async def input_text(self, index: int, text: str, clear: bool = True,
+                         submit: bool = False) -> str:
         if index not in self._selector_map:
             return f"Element [{index}] not found. Call get_state() again."
 
@@ -782,14 +979,25 @@ class BrowserTool:
         # thì agent tưởng đã điền xong và đi tiếp với bộ lọc RỖNG.
         typed = await self._input_value(center_x, center_y)
         shown = text if len(text) <= 30 else text[:30] + '...'
+
+        # Gõ xong bấm Enter luôn — gộp 2 lượt LLM thành 1. Kiểm tra giá trị TRƯỚC
+        # khi Enter, vì Enter thường làm trang đổi và lúc đó không đọc lại ô được nữa.
+        note = ''
+        if submit and (typed is None or text in typed):
+            await self._page.keyboard.press('Enter')
+            await self._human_pause()
+            await self._reconcile_page()
+            note = ' + Enter'
+
         if typed is None:
-            return f"Typed '{shown}' into [{index}]"
+            return f"Typed '{shown}' into [{index}]{note}"
         if text not in typed:
             return (f"Đã gõ '{shown}' vào [{index}] nhưng ô hiện đang là '{typed[:40]}' — "
                     "text KHÔNG vào được ô. Ô này có thể cần chọn từ danh sách/lịch gợi ý, "
                     "hoặc cần browser__press_key 'Enter' để xác nhận. Kiểm tra bằng "
-                    "browser__get_state trước khi đi tiếp.")
-        return f"Typed '{shown}' into [{index}] (ô hiện có: '{typed[:40]}')"
+                    "browser__get_state trước khi đi tiếp."
+                    + (" (đã bỏ qua Enter vì text chưa vào được ô.)" if submit else ""))
+        return f"Typed '{shown}' into [{index}]{note} (ô hiện có: '{typed[:40]}')"
 
     async def _input_value(self, x: float, y: float) -> str | None:
         try:
@@ -952,18 +1160,39 @@ class SyncBrowserTool:
         return self._loop_thread.run(self._tool.search(query, engine))
 
     def get_state(self, with_screenshot: bool = False, contains: str = "") -> str:
+        # Model không có vision thì BỎ QUA yêu cầu chụp ảnh. Trước đây vẫn chụp thật,
+        # mã hoá base64 vài trăm KB, rồi trả về dòng "[Screenshot available: N bytes]"
+        # — thứ mà DeepSeek không đọc được. Đo 01-08-2026: agent tự bật with_screenshot
+        # dù mô tả tool đã ghi rõ là đừng, mất trắng một bước mỗi lần.
+        note = ""
+        if with_screenshot and not self._tool.use_vision:
+            with_screenshot = False
+            note = ("\n[Bỏ qua ảnh chụp màn hình: model đang dùng KHÔNG đọc được ảnh. "
+                    "Chỉ dựa vào danh sách element bên trên, đừng yêu cầu lại.]")
         result = self._loop_thread.run(
             self._tool.get_state(force_include_screenshot=with_screenshot, contains=contains))
         if isinstance(result, tuple):
             text, screenshot = result
             return f"{text}\n[Screenshot available: {len(screenshot or '')} bytes]"
-        return result
+        return result + note
 
     def click(self, index: int, coordinate_x: int | None = None, coordinate_y: int | None = None) -> str:
         return self._loop_thread.run(self._tool.click(index, coordinate_x, coordinate_y))
 
-    def input_text(self, index: int, text: str, clear: bool = True) -> str:
-        return self._loop_thread.run(self._tool.input_text(index, text, clear))
+    def input_text(self, index: int, text: str, clear: bool = True,
+                   submit: bool = False) -> str:
+        return self._loop_thread.run(self._tool.input_text(index, text, clear, submit))
+
+    def click_label(self, label: str) -> str:
+        return self._loop_thread.run(self._tool.click_label(label))
+
+    def tiktok_creator_lookup(self, handle: str, timeout_seconds: int = 60) -> str:
+        return self._loop_thread.run(
+            self._tool.tiktok_creator_lookup(handle, timeout_seconds))
+
+    def type_label(self, label: str, text: str, submit: bool = False,
+                   clear: bool = True) -> str:
+        return self._loop_thread.run(self._tool.type_label(label, text, submit, clear))
 
     def scroll(self, pages: float = 1.0, direction: str = 'down') -> str:
         return self._loop_thread.run(self._tool.scroll(pages, direction))
@@ -1004,6 +1233,9 @@ class SyncBrowserTool:
     def api_responses(self, url_contains: str = '', max_results: int = 3,
                       body_chars: int = 1200) -> str:
         return self._tool.api_responses(url_contains, max_results, body_chars)
+
+    def api_json(self, url_contains: str, fields: str, max_responses: int = 8) -> str:
+        return self._tool.api_json(url_contains, fields, max_responses)
 
     def enable_event_log(self, path: str) -> None:
         # Đăng ký listener phải chạy TRÊN event loop của browser, không phải thread gọi.
