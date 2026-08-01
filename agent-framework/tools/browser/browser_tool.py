@@ -35,6 +35,7 @@ from tools.browser.detector import ClickableElementDetector, filter_nested_eleme
 from tools.browser.serializer import DOMSerializer
 from tools.browser.extract_action import ExtractAction, page_to_markdown
 from tools.browser import session_state
+from tools.browser import profile_cache
 from tools.browser.profile_lock import ProfileLock, ProfileInUse  # noqa: F401 (ProfileInUse re-export)
 
 
@@ -146,6 +147,19 @@ class BrowserTool:
             lock = ProfileLock(self.user_data_dir)
             lock.acquire()  # ném ProfileInUse kèm hướng dẫn nếu đang bị chiếm
             self._profile_lock = lock
+
+            # Dọn cache khi profile phình quá ngưỡng. Phải làm ở ĐÂY: đã giữ khoá
+            # (không ai chen vào) và Chromium chưa mở file (Windows khoá file đang
+            # mở). _PERSISTENT_ARGS bên dưới không đủ — nó chỉ chặn HTTP cache, còn
+            # Code Cache và Service Worker/CacheStorage vẫn phình tự do; đo 01-08-2026
+            # thấy hai mục đó chiếm 200/284MB. Xem profile_cache.py.
+            try:
+                note = profile_cache.prune(self.user_data_dir)
+                if note:
+                    print(note)
+            except Exception as e:
+                # Dọn dẹp hỏng thì KHÔNG được chặn việc mở browser.
+                print(f"(không dọn được cache profile: {type(e).__name__}: {e})")
 
         try:
             await self._launch()

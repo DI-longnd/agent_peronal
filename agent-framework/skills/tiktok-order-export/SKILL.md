@@ -22,13 +22,21 @@ Cần đã đăng nhập TikTok Shop Seller. Gặp form đăng nhập → DỪNG
 "Máy của bạn chưa đăng nhập TikTok Shop — chạy lệnh đăng nhập rồi thử lại."
 Không tự điền tài khoản/mật khẩu.
 
-## Thông tin phải có
-**Khoảng ngày**. User không nói rõ thì HỎI LẠI, đừng đoán — xuất nhầm khoảng thì
-file sai mà nhìn không ra.
+## Khoảng ngày
 
-Mốc tương đối ("tháng này", "7 ngày qua", "tuần trước") thì quy đổi theo ngày giờ
-trong `<environment>` ở system prompt, rồi **nói rõ khoảng ngày cụ thể trong báo cáo
-cuối** để user đối chiếu được. Đừng suy đoán hôm nay là ngày nào.
+Quy đổi mốc tương đối ("tháng này", "7 ngày qua", "3 tháng gần nhất", "tuần trước")
+theo ngày giờ trong `<environment>` của system prompt. Đừng tự suy đoán hôm nay là
+ngày nào.
+
+**Diễn giải được thì cứ làm, đừng hỏi lại.** Chọn cách hiểu tự nhiên nhất (đếm lùi
+từ hôm nay), rồi **ghi rõ khoảng ngày cụ thể ở báo cáo cuối** để user đối chiếu và
+bảo làm lại nếu lệch ý. Chờ user trả lời một câu hỏi mà đằng nào cũng phải đoán là
+làm mất thời gian của họ — đo được ở lượt chạy 01-08-2026: agent dừng lại hỏi "3
+tháng gần nhất" nghĩa là 01/05–01/08 hay tháng 5,6,7, trong khi chênh lệch chỉ là
+một ngày rìa và báo cáo cuối vẫn nói rõ.
+
+Chỉ HỎI LẠI khi **hoàn toàn không có thông tin thời gian** ("xuất đơn hàng cho tôi").
+Lúc đó đừng đoán: xuất nhầm khoảng thì file sai mà nhìn không ra.
 
 ## Quy trình
 
@@ -40,14 +48,26 @@ Trang mã hoá khoảng ngày vào URL bằng **2 mốc Unix timestamp mili-giâ
 https://seller-vn.tiktok.com/order?tab=all&time_order_created[]=<BẮT_ĐẦU>&time_order_created[]=<KẾT_THÚC>
 ```
 
-- `<BẮT_ĐẦU>` = 00:00:00.000 của ngày đầu, giờ địa phương, tính bằng **mili-giây**
-- `<KẾT_THÚC>` = 23:59:59.999 của ngày cuối
+- `<BẮT_ĐẦU>` = 00:00:00.000 của ngày đầu, giờ địa phương (VN = GMT+7), **mili-giây**
+- `<KẾT_THÚC>` = 23:59:59.999 của ngày cuối, cùng cách tính
 - `tab=all` bắt buộc — mặc định trang mở tab "Cần gửi", chỉ có đơn chờ vận chuyển.
 - KHÔNG kèm `shop_id`; TikTok tự điền từ phiên đăng nhập nên chạy đúng cho mọi khách.
 
-Ví dụ đã kiểm chứng — 01/01/2026 đến 31/07/2026 (giờ VN, GMT+7):
+**TỰ TÍNH cả hai mốc từ khoảng ngày user yêu cầu.** Đừng mượn con số của lần trước:
+đo ngày 01-08-2026, agent được yêu cầu "đến 01/08/2026" nhưng lại chép mốc kết thúc
+`1785517199999` (31/07) từ ví dụ trong tài liệu này, xuất thiếu mất một ngày, rồi
+tự bịa lý do "giới hạn kỹ thuật của TikTok Shop". Không có giới hạn nào cả — chỉ là
+chép nhầm số.
+
+Cách kiểm tra nhanh trước khi navigate: `(KẾT_THÚC - BẮT_ĐẦU + 1) / 86400000` phải
+ra đúng số ngày của khoảng (tính cả hai đầu). Lệch thì tính lại.
+
+Ví dụ minh hoạ cách tính — 01/01/2026 đến 31/07/2026 (giờ VN). **Đây là ví dụ cho
+một khoảng CỤ THỂ, không phải giá trị dùng lại được:**
 
 ```
+BẮT_ĐẦU = 01/01/2026 00:00:00.000 GMT+7 -> 1767200400000
+KẾT_THÚC = 31/07/2026 23:59:59.999 GMT+7 -> 1785517199999
 https://seller-vn.tiktok.com/order?tab=all&time_order_created[]=1767200400000&time_order_created[]=1785517199999
 ```
 
@@ -60,7 +80,11 @@ mà lịch lúc mở lúc không và mỗi lần thao tác lại tăng nguy cơ 
 `browser__wait` 4-6s (trang SPA nặng), rồi `browser__get_state`.
 
 Phải thấy chip khoảng ngày dạng **`DD/MM/YYYY-DD/MM/YYYY`** và `Bộ lọc (1)`.
-Đối chiếu chip với khoảng user yêu cầu. Không thấy chip → URL sai, dừng và báo.
+Không thấy chip → URL sai, dừng và báo.
+
+Đối chiếu chip với khoảng user yêu cầu. **Lệch dù chỉ một ngày → tính lại timestamp
+và navigate lại.** Đừng xuất tiếp rồi giải thích cho qua ở báo cáo cuối: chip chính
+là thứ TikTok hiểu, nó lệch nghĩa là file sẽ sai.
 
 ### Bước 3 — Mở bảng Xuất
 Click nút **"Xuất"** trên thanh công cụ (cạnh "Sắp xếp theo"). `browser__wait` 4s,
