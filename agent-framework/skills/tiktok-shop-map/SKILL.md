@@ -145,6 +145,11 @@ phải một số) · `0₫`.
 **Giữ NGUYÊN VĂN khi báo cáo.** Đừng quy đổi `1Mđ+` thành `1.000.000` — khách đối
 chiếu với màn hình họ đang nhìn, đổi đi là họ không dò được.
 
+> ⚠️ **Hệ quả khi xuất CSV:** dấu phẩy trong số trùng với dấu phân cách cột. Đo lượt
+> chạy thật 01-08-2026: dòng dữ liệu ra 22 trường trong khi header 16 cột — lệch 6,
+> dán vào Excel là sai hết mà không có dấu hiệu nào báo. **Ô nào chứa dấu phẩy phải
+> bọc `"…"`**, và đếm lại số cột trước khi trả kết quả.
+
 **Ngày viết ba kiểu khác nhau ở ba nơi**, đây là nguồn lỗi thật:
 
 | Ở đâu | Kiểu | Ví dụ |

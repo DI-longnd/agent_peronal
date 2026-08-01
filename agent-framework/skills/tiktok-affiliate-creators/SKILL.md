@@ -70,9 +70,15 @@ creators", "Mời"="Invite"):
    đánh giá, badge (vd Bán chạy nhất Top 5), bio/giới thiệu (ĐẶC BIỆT Hotline/SĐT
    và link liên hệ Zalo/email nếu có), khối Doanh số (GMV, Số món bán ra, GPM, GMV
    từ mỗi khách hàng), và chỉ số Video (lượt xem video trung bình, tỷ lệ tương tác)".
-   - Tab mặc định "Doanh số" đã hiển thị đủ các khối trên — CHỈ gọi extract 1 lần,
-     KHÔNG bấm sang tab khác (Video/Xu hướng...) và KHÔNG extract lại lần 2/3.
-   - Field nào không có trong kết quả extract → ghi `N/A`, không cố bấm thêm.
+   - **GIỚI HẠN CỨNG: ĐÚNG 1 lần `browser__extract` cho mỗi creator.** Tab mặc định
+     "Doanh số" đã hiển thị đủ mọi khối cần lấy. KHÔNG bấm sang tab Video / Xu hướng /
+     Nhà sáng tạo tương tự. KHÔNG extract lần 2.
+   - Field nào không có trong kết quả extract → ghi `N/A`, **không cố bấm thêm để tìm**.
+   - Vì sao là giới hạn cứng, không phải lời khuyên: đo 01-08-2026, một lượt chạy đi
+     khắp các tab dùng **8 lần extract + 11 lần click**, chạy hết số bước cho phép mà
+     vẫn chưa trả được kết quả — trong khi lượt làm đúng chỉ cần **1 extract**. Mỗi
+     lần extract là một lượt LLM đọc cả trang, và mỗi cú click là một cơ hội dính
+     captcha. Dữ liệu thêm ở các tab kia KHÔNG có trong bảng kết quả, lấy về cũng bỏ.
 8. Trả về kết quả có cấu trúc cho tên này (từ 1 lần extract ở trên).
 
 Main agent gom kết quả các tên rồi báo cáo theo Output format.
@@ -106,3 +112,25 @@ handle,ten_hien_thi,follower,danh_muc,diem_danh_gia,badge,zalo,email,hotline,gmv
 
 Ô nào không có dữ liệu ghi `N/A`. Cột `ghi_chu` dành cho bất thường (vd "handle
 không tìm thấy", "trang chi tiết không mở được").
+
+### BẮT BUỘC: bọc dấu ngoặc kép quanh MỌI ô chứa dấu phẩy
+
+Số của TikTok dùng **dấu phẩy làm dấu thập phân** (`699,9K`, `0,29%`, `145,22K`) — mà
+dấu phẩy cũng chính là dấu phân cách cột của CSV. Không bọc thì mỗi con số tự tách
+thành hai cột.
+
+Đo lượt chạy thật 01-08-2026: header 16 cột, dòng dữ liệu ra **22 trường — lệch 6 cột**.
+Dán vào Excel là sai toàn bộ mà **không có dấu hiệu nào báo**, khách cứ thế dùng.
+
+SAI:
+```
+thanhdongian.dtt,Thành Đơn Giản,699,9K,Trang phục nam,1.03,...
+```
+ĐÚNG:
+```
+thanhdongian.dtt,Thành Đơn Giản,"699,9K","Trang phục nam & Đồ lót",1.03,...
+```
+
+Quy tắc: ô nào chứa `,` hoặc `"` thì bọc trong `"…"` (dấu `"` bên trong nhân đôi thành
+`""`). An toàn nhất là **bọc hết mọi ô có số**. Trước khi trả lời, **đếm lại số dấu
+phẩy ngăn cột ở dòng dữ liệu phải bằng đúng dòng header** — lệch thì sửa, đừng trả ra.
