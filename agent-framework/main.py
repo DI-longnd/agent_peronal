@@ -6,10 +6,23 @@ main.py — CLI ALL-IN-ONE (não + tay cùng tiến trình): wiring toàn bộ f
 event stream in ra console ở đây CHÍNH LÀ thứ sau này chảy qua WebSocket
 lên giao diện web — thấy sai ở đây thì sửa trước khi đụng tới server.
 
-Chạy thử: python main.py
-(cần set biến môi trường DEEPSEEK_API_KEY, hoặc đổi base_url/model cho provider khác)
+Chạy thử:
+    python main.py                       # chạy câu lệnh mẫu
+    python main.py "câu lệnh của bạn"    # chạy đúng yêu cầu muốn thử
+
+Cần DEEPSEEK_API_KEY. Đổi model bằng LLM_MODEL, đổi provider bằng LLM_BASE_URL.
+
+Browser dùng CHUNG profile với companion app (%APPDATA%/PersonalAgent/browser-profile)
+nên đăng nhập một lần là cả hai đường đều chạy được — xem scripts/setup_browser_login.py.
+Hai bên không chạy đồng thời được, profile_lock sẽ chặn kèm thông báo rõ.
 """
 
+from subagents.dispatcher import SubagentDispatcher, load_subagent_config
+from tools.skill_loader import SkillLoader
+from tools.registry import ToolRegistry, Tool
+from core.agent_loop import AgentLoop
+from core.context_manager import ContextManager
+from core.llm_client import LLMClient
 import sys
 import os
 import json
@@ -22,14 +35,10 @@ if sys.stdout.encoding != "utf-8":
 
 load_dotenv()
 
-from core.llm_client import LLMClient
-from core.context_manager import ContextManager
-from core.agent_loop import AgentLoop
-from tools.registry import ToolRegistry, Tool
-from tools.skill_loader import SkillLoader
-from subagents.dispatcher import SubagentDispatcher, load_subagent_config
 
 ROOT = Path(__file__).parent
+
+DEFAULT_TASK = "Tra thông tin nhà sáng tạo TikTok Affiliate có handle thanhdongian.dtt"
 
 
 # --- Ví dụ tool thuộc domain ecom (namespaced: ecom__...) ---
@@ -103,8 +112,11 @@ def print_event(event: dict) -> None:
 def main() -> None:
     llm = LLMClient(
         api_key=os.environ.get("DEEPSEEK_API_KEY", "dummy"),
-        base_url="https://api.deepseek.com",
-        model="deepseek-chat",
+        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+        # deepseek-chat ĐÃ BỊ KHAI TỬ — gọi vào là HTTP 400 "supported API model
+        # names are deepseek-v4-pro or deepseek-v4-flash". Server đã đổi từ
+        # commit 02ba946; CLI này bị bỏ quên nên đứng hỏng cho tới 31-07-2026.
+        model=os.environ.get("LLM_MODEL", "deepseek-v4-pro"),
     )
 
     # full_registry của dispatcher chỉ chứa tool server-side (ecom). Browser tools
@@ -122,13 +134,22 @@ def main() -> None:
         # Import ở đây (không phải đầu file) để CLI vẫn chạy được các task không
         # cần browser trong môi trường chưa cài playwright.
         from tools.browser.browser_tool import SyncBrowserTool
+        from tools.browser.manual_login import default_profile_dir
         from tools.browser.registration import build_browser_registry, load_sensitive_data_from_env
 
         if browser_holder["tool"] is None:
             sync_browser = SyncBrowserTool(
                 llm,
-                headless=os.environ.get("BROWSER_HEADLESS", "false").lower() == "true",
-                storage_state_path=os.environ.get("BROWSER_STORAGE_STATE") or None,
+                headless=os.environ.get(
+                    "BROWSER_HEADLESS", "false").lower() == "true",
+                # Cùng profile với companion app: đăng nhập 1 lần dùng cho cả hai.
+                user_data_dir=os.environ.get(
+                    "BROWSER_USER_DATA_DIR") or str(default_profile_dir()),
+                storage_state_path=os.environ.get(
+                    "BROWSER_STORAGE_STATE") or None,
+                downloads_dir=os.environ.get("BROWSER_DOWNLOADS_DIR")
+                or str(Path.home() / "Downloads" / "PersonalAgent"),
+                viewport={"width": 1280, "height": 950},
                 use_vision=False,  # DeepSeek không có vision
             )
             sync_browser.start()
@@ -143,7 +164,8 @@ def main() -> None:
         local_tools_factory=local_tools_factory,
     )
     dispatcher.register(load_subagent_config(ROOT / "subagents/ecom-agent.md"))
-    dispatcher.register(load_subagent_config(ROOT / "subagents/browser-agent.md"))
+    dispatcher.register(load_subagent_config(
+        ROOT / "subagents/browser-agent.md"))
 
     main_agent = AgentLoop(
         llm=llm,
@@ -154,10 +176,13 @@ def main() -> None:
         dispatcher=dispatcher,
     )
 
+    # Nhận yêu cầu từ dòng lệnh — thử skill mới chỉ cần đổi câu lệnh, không phải
+    # sửa file rồi chạy lại.
+    task = " ".join(sys.argv[1:]).strip() or DEFAULT_TASK
+    print(f"[task] {task}\n")
+
     try:
-        result = main_agent.run(
-            "Kiểm tra tình trạng đơn hàng SA-00123 giúp tôi", on_event=print_event
-        )
+        result = main_agent.run(task, on_event=print_event)
         print(result)
     finally:
         if browser_holder["tool"] is not None:
