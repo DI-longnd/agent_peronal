@@ -38,19 +38,19 @@ DEFAULT_URL = "https://affiliate.tiktok.com/"
 
 def main() -> None:
     from tools.browser.manual_login import (
-        run_manual_login, check_session, default_profile_dir,
+        run_manual_login, check_session, default_profile_dir, default_state_path,
     )
 
     args = sys.argv[1:]
     check_only = "--check" in args
     url = next((a for a in args if not a.startswith("--")), DEFAULT_URL)
 
-    storage_state_path = os.environ.get("BROWSER_STORAGE_STATE")
-    if not storage_state_path:
-        print("Lỗi: chưa set BROWSER_STORAGE_STATE trong .env — không có nơi lưu bản sao lưu phiên.")
-        sys.exit(1)
-
+    # Mặc định trùng companion app. Trước đây bắt buộc phải có BROWSER_STORAGE_STATE
+    # trong .env, và giá trị mẫu lại trỏ vào chỗ riêng của agent-framework — nên bản
+    # sao lưu của CLI và của app trôi khỏi nhau mà không ai để ý.
+    storage_state_path = os.environ.get("BROWSER_STORAGE_STATE") or str(default_state_path())
     profile = os.environ.get("BROWSER_USER_DATA_DIR") or str(default_profile_dir())
+    Path(storage_state_path).parent.mkdir(parents=True, exist_ok=True)
 
     if check_only:
         ok = check_session(url, user_data_dir=profile, storage_state_path=storage_state_path)

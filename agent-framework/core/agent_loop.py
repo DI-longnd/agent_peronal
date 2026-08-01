@@ -21,6 +21,7 @@ Phase 0 (PLAN.md mục 4.7 + 5): AgentLoop chạy được trong chế độ ser
 
 from __future__ import annotations
 import json
+from datetime import datetime
 from typing import Callable
 from core.llm_client import LLMClient
 from core.context_manager import ContextManager, WRITE_NOTE_SCHEMA, READ_NOTES_SCHEMA
@@ -56,10 +57,27 @@ class AgentLoop:
         self._system_prompt = system_prompt
         self._dispatcher = dispatcher
 
+    @staticmethod
+    def _environment_block() -> str:
+        """Ngày giờ hiện tại. LLM không tự biết hôm nay là ngày nào — và nó KHÔNG
+        hỏi lại, nó đoán. Đo được ở lượt chạy 01-08-2026: agent xuất đơn khoảng
+        12/2025–07/2026 rồi cảnh báo khách rằng khoảng này "nằm trong tương lai",
+        trong khi nó đã qua hết. Mọi yêu cầu kiểu "tháng này", "7 ngày qua",
+        "tuần trước" đều phụ thuộc khối này."""
+        now = datetime.now().astimezone()
+        thu = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm",
+               "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][now.weekday()]
+        return (
+            f"Bây giờ là {thu}, {now:%d/%m/%Y %H:%M} (múi giờ {now:%z}).\n"
+            "Mọi mốc thời gian tương đối (hôm nay, hôm qua, tuần này, tháng trước, "
+            "7 ngày qua...) phải quy đổi theo thời điểm trên."
+        )
+
     def _full_system_prompt(self) -> str:
         # Theo "Effective context engineering": tổ chức prompt thành section rõ ràng
         prompt = (
             f"{self._system_prompt}\n\n"
+            f"<environment>\n{self._environment_block()}\n</environment>\n\n"
             f"<available_skills>\n{self._skills.discovery_prompt_block()}\n</available_skills>"
         )
         if self._dispatcher is not None:

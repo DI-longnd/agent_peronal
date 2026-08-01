@@ -30,8 +30,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-if sys.stdout.encoding != "utf-8":
-    sys.stdout.reconfigure(encoding="utf-8")
+# line_buffering: khi hứng output ra file (`main.py ... > run.log`) Python đệm theo
+# khối, nên nhật ký event đứng im tới lúc tiến trình thoát — đúng lúc cần theo dõi
+# một lượt chạy dài thì lại không thấy gì. Ép xả từng dòng.
+sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 load_dotenv()
 
@@ -134,7 +136,7 @@ def main() -> None:
         # Import ở đây (không phải đầu file) để CLI vẫn chạy được các task không
         # cần browser trong môi trường chưa cài playwright.
         from tools.browser.browser_tool import SyncBrowserTool
-        from tools.browser.manual_login import default_profile_dir
+        from tools.browser.manual_login import default_profile_dir, default_state_path
         from tools.browser.registration import build_browser_registry, load_sensitive_data_from_env
 
         if browser_holder["tool"] is None:
@@ -145,8 +147,9 @@ def main() -> None:
                 # Cùng profile với companion app: đăng nhập 1 lần dùng cho cả hai.
                 user_data_dir=os.environ.get(
                     "BROWSER_USER_DATA_DIR") or str(default_profile_dir()),
+                # Cùng file sao lưu với app — xem default_state_path().
                 storage_state_path=os.environ.get(
-                    "BROWSER_STORAGE_STATE") or None,
+                    "BROWSER_STORAGE_STATE") or str(default_state_path()),
                 downloads_dir=os.environ.get("BROWSER_DOWNLOADS_DIR")
                 or str(Path.home() / "Downloads" / "PersonalAgent"),
                 viewport={"width": 1280, "height": 950},

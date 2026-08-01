@@ -26,6 +26,10 @@ Không tự điền tài khoản/mật khẩu.
 **Khoảng ngày**. User không nói rõ thì HỎI LẠI, đừng đoán — xuất nhầm khoảng thì
 file sai mà nhìn không ra.
 
+Mốc tương đối ("tháng này", "7 ngày qua", "tuần trước") thì quy đổi theo ngày giờ
+trong `<environment>` ở system prompt, rồi **nói rõ khoảng ngày cụ thể trong báo cáo
+cuối** để user đối chiếu được. Đừng suy đoán hôm nay là ngày nào.
+
 ## Quy trình
 
 ### Bước 1 — Vào thẳng URL đã kèm khoảng ngày (KHÔNG dùng bộ lọc)
@@ -71,10 +75,11 @@ Panel mở ra khi thấy dòng **"Đơn hàng đã lọc (N đơn hàng)"**.
 Click **"Đơn hàng đã lọc (N đơn hàng)"**.
 KHÔNG chọn "Tất cả đơn hàng..." — bỏ qua bộ lọc, xuất 12 tháng gần nhất.
 
-### Bước 5 — Định dạng
-Nếu thấy tuỳ chọn **CSV** thì click. Không thấy trong danh sách element thì cứ đi
-tiếp — lần chạy kiểm chứng file xuất ra vẫn là `.csv`. Ở bước cuối, đối chiếu đuôi
-file thật để biết mình nhận được gì.
+### Bước 5 — Định dạng: KHÔNG có gì để chọn
+Panel này **không cấp tuỳ chọn định dạng**. Đã soi toàn bộ element khi panel mở
+(01-08-2026): không có CSV / Excel / xlsx / "Định dạng" — chỉ có 3 lựa chọn phạm vi,
+nút Xuất, các nút Tải xuống của lịch sử, và nút Đóng. TikTok Shop VN luôn trả `.csv`
+(56 cột, BOM UTF-8). Đừng phí lượt đi tìm nút định dạng.
 
 ### Bước 6 — Bấm Xuất trong panel
 Trong danh sách element sẽ có **hai** nút tên "Xuất": một là nút thanh công cụ ở

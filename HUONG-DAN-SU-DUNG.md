@@ -89,8 +89,15 @@ tải về máy bạn** — agent sẽ báo đường dẫn, mặc định:
 C:\Users\<tên bạn>\Downloads\PersonalAgent\
 ```
 
-Tên file có mốc thời gian ở đầu nên xuất nhiều lần không đè lên nhau. Nhớ **nói rõ
-khoảng ngày**; không nói thì agent sẽ hỏi lại chứ không tự đoán.
+Tên file có mốc thời gian ở đầu nên xuất nhiều lần không đè lên nhau.
+
+File luôn là **CSV** — TikTok Shop không cho chọn Excel ở bảng xuất này. File có sẵn
+BOM UTF-8 nên mở bằng Excel không lỗi font tiếng Việt.
+
+Khoảng ngày nói kiểu nào cũng được: ghi rõ ngày (`từ 01/12/2025 đến 31/07/2026`) hoặc
+nói tương đối (`tháng này`, `7 ngày qua`, `tuần trước`) — agent biết hôm nay là ngày
+nào. Không nói gì về thời gian thì agent hỏi lại chứ không tự đoán. Báo cáo cuối luôn
+ghi lại khoảng ngày cụ thể, **đối chiếu chỗ đó** trước khi dùng file.
 
 Mẹo:
 - Mỗi lần nên tra **tối đa 6-7 tên** — danh sách dài hơn thì chia làm nhiều lần.

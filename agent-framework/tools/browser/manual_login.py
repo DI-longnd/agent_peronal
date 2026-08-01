@@ -38,6 +38,17 @@ def default_profile_dir() -> Path:
     return Path(base) / "PersonalAgent" / "browser-profile"
 
 
+def default_state_path() -> Path:
+    """Bản sao lưu phiên dạng JSON — nằm CẠNH profile, cùng chỗ companion app ghi.
+
+    Trước đây CLI trỏ vào agent-framework/.auth/state.json còn app ghi vào %APPDATA%.
+    Hai file trôi khỏi nhau: đo ngày 01-08-2026, file của CLI còn là phiên 18-07 đã
+    chết trong khi phiên thật vẫn sống. Không gây lỗi (dùng profile thì file JSON chỉ
+    là bản lưu dự phòng, không được nạp), nhưng ai đi kiểm tra bằng file đều bị nó
+    đánh lừa. Một đường dẫn duy nhất thì không lệch được."""
+    return default_profile_dir().parent / "state.json"
+
+
 def archive_profile(profile: Path, attempts: int = 6) -> Path:
     """Dời profile cũ sang tên có mốc thời gian (không xoá hẳn — lỡ tay còn cứu).
 
