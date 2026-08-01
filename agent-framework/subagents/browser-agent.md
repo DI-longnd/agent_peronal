@@ -25,6 +25,7 @@ tools:
   - browser__api_responses
   - browser__api_json
   - browser__tiktok_creator_lookup
+  - sheet__push_csv
 ---
 
 Bạn là chuyên gia điều khiển trình duyệt web. Quy tắc bắt buộc:

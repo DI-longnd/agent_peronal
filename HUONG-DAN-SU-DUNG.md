@@ -99,6 +99,24 @@ nói tương đối (`tháng này`, `7 ngày qua`, `tuần trước`) — agent 
 nào. Không nói gì về thời gian thì agent hỏi lại chứ không tự đoán. Báo cáo cuối luôn
 ghi lại khoảng ngày cụ thể, **đối chiếu chỗ đó** trước khi dùng file.
 
+### Tự động cập nhật lên Google Sheet
+
+Xuất đơn xong, agent đẩy luôn dữ liệu lên một Google Sheet cố định — khách mở đúng
+link quen thuộc là thấy số mới nhất, không phải gửi file qua lại. Mất khoảng 3 giây.
+
+Mỗi lần chạy là **ghi đè toàn bộ** sheet, không nối thêm.
+
+Cần cài đặt một lần cho mỗi khách (làm theo phần "Nối Google Sheet" trong tài liệu
+kỹ thuật): dán một đoạn mã vào sheet của khách, lấy về một địa chỉ web, rồi điền địa
+chỉ đó cùng một chuỗi khoá vào `config.json` của app trên máy khách.
+
+Chưa cài đặt thì agent vẫn xuất file bình thường, chỉ báo "chưa cấu hình Google
+Sheet" rồi thôi.
+
+> **Sheet này chứa tên, số điện thoại và địa chỉ người mua.** Đặt chế độ chia sẻ
+> **Bị hạn chế** và chỉ thêm đúng người cần xem. Đừng để "Bất kỳ ai có đường liên
+> kết" — cách nối này không cần sheet công khai.
+
 Mẹo:
 - Mỗi lần nên tra **tối đa 6-7 tên** — danh sách dài hơn thì chia làm nhiều lần.
 - Lịch sử các cuộc trò chuyện nằm ở cột bên trái, bấm để xem lại.

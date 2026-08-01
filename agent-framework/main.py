@@ -157,7 +157,18 @@ def main() -> None:
             )
             sync_browser.start()
             browser_holder["tool"] = sync_browser
-        return build_browser_registry(browser_holder["tool"], load_sensitive_data_from_env())
+
+        registry = build_browser_registry(
+            browser_holder["tool"], load_sensitive_data_from_env())
+        # sheet__* đi cùng nhóm "tool chạy trên máy khách". Ở CLI thì máy khách
+        # chính là máy này, nên URL/token đọc từ .env thay vì config.json của app.
+        from tools.sheets.registration import build_sheet_registry
+        for tool in build_sheet_registry(
+            os.environ.get("SHEET_WEBAPP_URL", ""),
+            os.environ.get("SHEET_TOKEN", ""),
+        ).all_tools():
+            registry.register(tool)
+        return registry
 
     dispatcher = SubagentDispatcher(
         llm,

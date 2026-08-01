@@ -16,6 +16,7 @@ import json
 
 from tools.registry import ToolRegistry, Tool
 from tools.browser.registration import BROWSER_TOOL_SPECS, PAGE_MARKDOWN_SPEC
+from tools.sheets.registration import SHEET_TOOL_SPECS
 from tools.browser.extract_action import extract_from_markdown
 from server.device_hub import DeviceHub
 
@@ -61,7 +62,10 @@ def build_remote_browser_registry(
         raise RuntimeError("app trên máy khách chưa kết nối")
 
     registry = ToolRegistry()
-    for spec in BROWSER_TOOL_SPECS:
+    # sheet__* cũng chạy trên device (file CSV nằm ở Downloads của khách) nên đi
+    # cùng đường RPC. URL/token KHÔNG có trong parameters — device tự lấy từ
+    # config.json của nó, server và LLM không bao giờ thấy giá trị thật.
+    for spec in BROWSER_TOOL_SPECS + SHEET_TOOL_SPECS:
         if spec["name"] == "browser__extract":
             handler = _make_extract_handler(hub, user_id, llm, timeout)
         else:

@@ -45,6 +45,11 @@ class ToolExecutor:
 
     def execute(self, tool: str, args: dict) -> str:
         """LUÔN trả string (kể cả lỗi) — WS loop không bao giờ được chết vì 1 tool."""
+        # Tool sheet__* KHÔNG cần browser. Xử riêng trước để không phải khởi động
+        # Chromium chỉ để đẩy một file lên Google Sheet.
+        if tool.startswith("sheet__"):
+            return self._execute_sheet(tool, args)
+
         method_name = self._allowed.get(tool)
         if method_name is None:
             return f"Từ chối: tool '{tool}' không nằm trong danh sách cho phép của app này."
@@ -56,6 +61,36 @@ class ToolExecutor:
                 # secrets nằm trong config.json local — không bao giờ rời máy này
                 return method(args["index"], args["placeholder"], self._cfg.get("secrets", {}))
             return method(**args)
+        except Exception as e:
+            return f"Lỗi khi chạy '{tool}' trên máy này: {type(e).__name__}: {e}"
+
+    def _execute_sheet(self, tool: str, args: dict) -> str:
+        """URL + token lấy từ config.json TRÊN MÁY NÀY, không nhận từ tham số.
+
+        Cùng nguyên tắc với browser__type_sensitive: giá trị bí mật không bao giờ đi
+        qua LLM, không nằm trong lịch sử hội thoại, không lên log của server."""
+        if tool != "sheet__push_csv":
+            return f"Từ chối: tool '{tool}' không nằm trong danh sách cho phép của app này."
+
+        # Chỉ nhận đúng csv_path. Tham số lạ thì TỪ CHỐI TƯỜNG MINH thay vì bỏ qua
+        # âm thầm: hôm nay bỏ qua là an toàn, nhưng chỉ cần một lần refactor đổi
+        # thành push_csv(**args) là chỗ này thành đường tiêm URL/token của người khác.
+        # Báo lỗi rõ cũng dạy LLM biết hai giá trị đó không thuộc về nó.
+        extra = set(args) - {"csv_path"}
+        if extra:
+            return (f"Từ chối: sheet__push_csv chỉ nhận 'csv_path', không nhận "
+                    f"{sorted(extra)}. Địa chỉ sheet và khoá bí mật do máy khách tự "
+                    "quản lý trong config.json, không truyền qua tham số.")
+        if "csv_path" not in args:
+            return "Thiếu tham số 'csv_path' — đường dẫn file CSV cần đẩy lên."
+
+        try:
+            from tools.sheets.client import push_csv
+            return push_csv(
+                args["csv_path"],
+                self._cfg.get("sheet_webapp_url", ""),
+                self._cfg.get("sheet_token", ""),
+            )
         except Exception as e:
             return f"Lỗi khi chạy '{tool}' trên máy này: {type(e).__name__}: {e}"
         finally:

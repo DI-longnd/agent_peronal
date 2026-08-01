@@ -57,6 +57,12 @@ def _defaults() -> dict:
         # Downloads chứ không phải %APPDATA% — khách phải tự mở được thư mục này.
         "downloads_dir": str(Path.home() / "Downloads" / "PersonalAgent"),
         "secrets": {},  # {"site_password": "..."} cho browser__type_sensitive
+        # Google Sheet của khách, đẩy file đơn hàng lên qua Apps Script Web App.
+        # Để trống thì tool sheet__push_csv báo "chưa cấu hình" chứ không lỗi.
+        # KHÔNG bao giờ gửi hai giá trị này lên server hay cho LLM thấy — executor
+        # tự điền vào lúc chạy, giống secrets ở trên.
+        "sheet_webapp_url": "",   # https://script.google.com/macros/s/.../exec
+        "sheet_token": "",        # phải khớp hằng số TOKEN trong Apps Script
     }
 
 
