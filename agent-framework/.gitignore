@@ -17,3 +17,8 @@ wheels/
 
 # Browser storage state (chứa cookie/session đăng nhập thật — không commit)
 .auth/
+
+# Ghi chú agent tự viết lúc chạy (write_note) — dữ liệu của từng lượt chạy,
+# không phải mã nguồn. Giữ thư mục, bỏ nội dung.
+memory/notes/*
+!memory/notes/.gitkeep
