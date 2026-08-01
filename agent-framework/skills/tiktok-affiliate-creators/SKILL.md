@@ -9,6 +9,10 @@ description: >
 
 # TikTok Affiliate — Tra cứu nhà sáng tạo
 
+Quy trình dưới đây đã đủ. Chỉ khi phải đi ra ngoài nó thì mới
+`read_skill("tiktok-shop-map")` — ở đó có bản đồ cả hai trang TikTok Shop và quy ước
+đọc số (dấu phẩy là dấu THẬP PHÂN: `183,13K` = 183.130).
+
 ## Khi nào dùng skill này
 User đưa MỘT DANH SÁCH TÊN/HANDLE creator (vd `thanhdongian.dtt`) và cần thông tin
 chi tiết của từng người: liên hệ, follower, doanh số, chỉ số video. KHÔNG dùng cho

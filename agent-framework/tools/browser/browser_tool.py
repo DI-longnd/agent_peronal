@@ -600,12 +600,42 @@ class BrowserTool:
         note = f"\n\n(đã ẩn {hidden} element không khớp \"{needle}\")" if hidden else ""
         return "\n".join(head + body) + note
 
+    async def _scan_elements(self, attempts: int = 3) -> list:
+        """Quét element, thử lại khi trang tự chuyển hướng giữa chừng.
+
+        Nhiều trang TikTok Shop tự redirect sau khi tải (vd /promotion/marketing-tools
+        -> /tool-choose, /sea-growth/growth). Nếu redirect rơi đúng lúc evaluate() đang
+        chạy thì Playwright ném 'Execution context was destroyed' — đo được ngày
+        01-08-2026, lỗi này làm hỏng cả lượt khảo sát ở trang thứ 18. Với agent thì nó
+        nổi lên thành exception thô, không phải thông báo làm gì tiếp được.
+
+        Chuyển hướng xong là DOM mới ổn định, nên chỉ cần chờ rồi quét lại."""
+        last = None
+        for i in range(attempts):
+            try:
+                return await self._page.evaluate(INTERACTIVE_SCAN_JS)
+            except Exception as e:
+                if 'Execution context was destroyed' not in str(e) and \
+                   'navigation' not in str(e).lower():
+                    raise
+                last = e
+                await self._reconcile_page()
+                try:
+                    await self._page.wait_for_load_state('domcontentloaded', timeout=8000)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.6 * (i + 1))
+        raise RuntimeError(
+            f"Trang liên tục tự chuyển hướng nên không đọc được element sau {attempts} "
+            f"lần thử ({last}). Gọi browser__wait 3s rồi browser__get_state lại."
+        )
+
     async def get_state(self, force_include_screenshot: bool | None = None,
                         contains: str = "") -> str | tuple[str, str | None]:
         await self._reconcile_page()  # bám tab mới nhất (nếu vừa mở tab khác)
         await asyncio.sleep(0.1)  # Đợi DOM ổn định
 
-        raw_elements = await self._page.evaluate(INTERACTIVE_SCAN_JS)
+        raw_elements = await self._scan_elements()
 
         listener_indices = self._detect_click_listeners(raw_elements)
         for i, el in enumerate(raw_elements):

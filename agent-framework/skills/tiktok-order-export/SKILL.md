@@ -9,6 +9,10 @@ description: >
 
 # TikTok Shop — Xuất file đơn hàng theo khoảng ngày
 
+Quy trình dưới đây đã đủ để làm việc này — **không cần đọc thêm skill nào khác**.
+Chỉ khi phải đi ra ngoài nó (user hỏi mục khác, cần lọc theo tiêu chí lạ, trang đổi
+giao diện) thì mới `read_skill("tiktok-shop-map")` để xem bản đồ toàn trang.
+
 ## Khi nào dùng skill này
 User cần **file** danh sách đơn hàng trong một khoảng thời gian. Khác skill tra
 creator (agent tự đọc rồi trả text): ở đây **TikTok tạo file** và trình duyệt tải
