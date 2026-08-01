@@ -26,6 +26,7 @@ import json
 import random
 import re
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -91,6 +92,7 @@ class BrowserTool:
         self._event_log_path = ''
         self._nav_count = 0
         self._snapshot_note = ''
+        self._session_warned = False  # cảnh báo hạn phiên chỉ nói 1 lần/lượt chạy
         self._downloads: list[dict] = []
         # Trang nào đã gắn listener rồi — gắn 2 lần sẽ chạy handler 2 lần. Với
         # download thì 2 handler cùng save_as vào MỘT đường dẫn = hỏng file.
@@ -526,7 +528,37 @@ class BrowserTool:
                 self._page = await self._context.new_page()
         await self._page.goto(url, wait_until='domcontentloaded', timeout=30000)
         await self._human_pause()
-        return f"Navigated to {self._page.url}"
+        return f"Navigated to {self._page.url}{self._session_warning()}"
+
+    # Cảnh báo hạn phiên MỘT LẦN, gắn vào navigate đầu tiên. Đặt ở đây vì đây là
+    # thao tác mở màn của mọi việc dùng web: biết phiên sắp đứt TRƯỚC khi làm việc
+    # dài thì còn kịp báo người dùng, chứ hỏng giữa chừng là mất cả lượt chạy.
+    # Con số đọc từ bản sao lưu JSON nên là ƯỚC LƯỢNG — phiên thật nằm trong profile.
+    _WARN_UNDER_HOURS = 12
+
+    def _session_warning(self) -> str:
+        if self._session_warned or not self.storage_state_path:
+            return ""
+        self._session_warned = True
+        try:
+            state = session_state.read(self.storage_state_path)
+            if not state:
+                return ""
+            # Phải hỏi status() cho ca ĐÃ HẾT HẠN: expires_at()/hours_left() chỉ nhìn
+            # cookie CÒN SỐNG, phiên chết thì không còn cookie nào sống nên trả None.
+            code, _ = session_state.status(state)
+            left = session_state.expires_at(state)
+            left = None if left is None else (left - time.time()) / 3600
+        except Exception:
+            return ""
+        if code == 'expired':
+            return ("\n\n⚠️ PHIÊN ĐĂNG NHẬP ĐÃ HẾT HẠN. Trang nhiều khả năng sẽ hiện form "
+                    "đăng nhập. Dừng lại và báo người dùng chạy đăng nhập lại, đừng cố "
+                    "thao tác tiếp.")
+        if left is None or left > self._WARN_UNDER_HOURS:
+            return ""
+        return (f"\n\n⚠️ Phiên đăng nhập chỉ còn khoảng {left:.1f} giờ. Làm việc ngắn thì "
+                "vẫn kịp, nhưng hãy nhắc người dùng đăng nhập lại sớm — nêu ở cuối báo cáo.")
 
     async def go_back(self) -> str:
         await self._page.go_back()
@@ -546,7 +578,30 @@ class BrowserTool:
         return f"Searched {engine} for '{query}'"
 
     # ========== DOM SCANNING ==========
-    async def get_state(self, force_include_screenshot: bool | None = None) -> str | tuple[str, str | None]:
+    @staticmethod
+    def _keep_matching(text: str, needle: str) -> str:
+        """Chỉ giữ dòng element khớp `needle`, giữ nguyên phần đầu (URL/Title/cảnh báo).
+
+        LỌC DÒNG HIỂN THỊ, KHÔNG lọc danh sách element: [index] do serializer đánh số
+        trên TOÀN BỘ element và selector_map giữ nguyên, nên số hiện ra vẫn đúng với
+        cái click() sẽ bấm. Lọc trước khi đánh số thì index lệch -> bấm nhầm chỗ.
+        """
+        pattern = re.compile('|'.join(re.escape(p.strip()) for p in needle.split('|') if p.strip()),
+                             re.IGNORECASE)
+        head, kept, hidden = [], [], 0
+        for line in text.splitlines():
+            if not re.match(r'\s*\[\d+\]', line):
+                head.append(line)
+            elif pattern.search(line):
+                kept.append(line)
+            else:
+                hidden += 1
+        body = kept or ["(không element nào khớp — gọi lại không kèm 'contains' để xem đầy đủ)"]
+        note = f"\n\n(đã ẩn {hidden} element không khớp \"{needle}\")" if hidden else ""
+        return "\n".join(head + body) + note
+
+    async def get_state(self, force_include_screenshot: bool | None = None,
+                        contains: str = "") -> str | tuple[str, str | None]:
         await self._reconcile_page()  # bám tab mới nhất (nếu vừa mở tab khác)
         await asyncio.sleep(0.1)  # Đợi DOM ổn định
 
@@ -584,6 +639,9 @@ class BrowserTool:
                 "Hãy gọi browser__wait_for_human để chờ người dùng xử lý, rồi gọi lại "
                 "browser__get_state. TUYỆT ĐỐI không tự click/kéo để giải captcha.\n\n"
             ) + text
+
+        if contains:
+            text = self._keep_matching(text, contains)
 
         include_screenshot = force_include_screenshot if force_include_screenshot is not None else self.use_vision
 
@@ -863,8 +921,9 @@ class SyncBrowserTool:
     def search(self, query: str, engine: str = 'duckduckgo') -> str:
         return self._loop_thread.run(self._tool.search(query, engine))
 
-    def get_state(self, with_screenshot: bool = False) -> str:
-        result = self._loop_thread.run(self._tool.get_state(force_include_screenshot=with_screenshot))
+    def get_state(self, with_screenshot: bool = False, contains: str = "") -> str:
+        result = self._loop_thread.run(
+            self._tool.get_state(force_include_screenshot=with_screenshot, contains=contains))
         if isinstance(result, tuple):
             text, screenshot = result
             return f"{text}\n[Screenshot available: {len(screenshot or '')} bytes]"

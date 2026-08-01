@@ -56,6 +56,9 @@ class AgentLoop:
         self._ctx = context_mgr
         self._system_prompt = system_prompt
         self._dispatcher = dispatcher
+        # Hội thoại của lần run gần nhất, để gọi tiếp mà không phải làm lại từ đầu
+        # (dispatcher dùng cho resume — xem SubagentDispatcher.dispatch).
+        self.last_messages: list[dict] = []
 
     @staticmethod
     def _environment_block() -> str:
@@ -115,7 +118,10 @@ class AgentLoop:
             return self._ctx.read_notes()
         if name == "dispatch_subagent" and self._dispatcher is not None:
             return self._dispatcher.dispatch(
-                args["subagent_name"], args["task"], on_event=on_event, should_stop=should_stop
+                args["subagent_name"], args["task"],
+                skill=args.get("skill"),
+                resume=bool(args.get("resume")),
+                on_event=on_event, should_stop=should_stop,
             )
         return None
 
@@ -137,18 +143,24 @@ class AgentLoop:
             messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
+        # Số prompt token THẬT của lượt gọi gần nhất, dùng để quyết định lúc nào nén
+        # context. Chính xác hơn hẳn đếm ký tự vì đã gồm cả schema tool.
+        last_prompt_tokens = 0
+
         for _ in range(MAX_ITERATIONS):
             if stop():
                 return "(run đã dừng: bị hủy hoặc quá thời gian)"
 
-            if self._ctx.should_compact(messages):
+            if self._ctx.should_compact(messages, last_prompt_tokens):
                 messages = self._ctx.compact(messages)
+                last_prompt_tokens = 0  # đã nén — chờ số thật mới, đừng nén lần nữa ngay
 
             tools = self._framework_tool_schemas() + self._registry.active_schemas()
             response = self._llm.chat(messages, tools=tools)
 
             usage = getattr(response.raw, "usage", None)
             if usage is not None:
+                last_prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
                 emit(
                     {
                         "type": "llm_usage",
@@ -159,7 +171,11 @@ class AgentLoop:
                 )
 
             if not response.tool_calls:
-                return response.content or ""
+                answer = response.content or ""
+                # Giữ lại cả câu trả lời cuối: nếu người gọi cần bảo "làm lại chỗ này",
+                # subagent phải nhớ nó vừa nói gì.
+                self.last_messages = messages + [{"role": "assistant", "content": answer}]
+                return answer
 
             # Ghi lại đúng format chuẩn OpenAI cho lượt gọi tiếp theo: "arguments"
             # phải là JSON string (không phải dict đã parse), và mỗi tool call
@@ -205,6 +221,7 @@ class AgentLoop:
                 )
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
 
+        self.last_messages = messages
         return (
             "Đã đạt giới hạn số bước lặp (MAX_ITERATIONS) trước khi hoàn tất — đây KHÔNG "
             "hẳn là thất bại và KHÔNG có nghĩa là chưa đăng nhập (chỉ kết luận 'chưa đăng "

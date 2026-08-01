@@ -1,17 +1,20 @@
 ---
 name: browser-automation
 description: >
-  Điều khiển trình duyệt web để duyệt trang, điền form, tìm kiếm, đăng nhập, hoặc
-  trích xuất thông tin. Dùng khi task nhắc tới website, trang web, form online,
-  đăng nhập vào 1 dịch vụ, hoặc cần lấy dữ liệu từ 1 URL cụ thể.
+  Cách lái trình duyệt cho trang web BẤT KỲ — kỹ thuật chung, không gắn với trang
+  nào. Dùng làm PHƯƠNG ÁN CUỐI khi không có skill chuyên biệt cho trang đó. Trang
+  TikTok Shop / TikTok Affiliate LUÔN có skill riêng, dùng skill đó thay vì skill này.
 ---
 
-# Browser Automation
+# Browser Automation — kỹ thuật chung
 
 ## Khi nào dùng skill này
-Task cần tương tác thật với 1 trang web (không phải chỉ gọi API có sẵn) — vd:
-điền form không có API, tìm kiếm sản phẩm trên 1 sàn không hỗ trợ API, đăng nhập
-vào 1 dịch vụ để lấy thông tin.
+Chỉ khi trang cần thao tác KHÔNG có skill riêng. Kiểm tra danh sách skill trước:
+- TikTok Shop, đơn hàng → `tiktok-order-export`
+- TikTok Affiliate, creator → `tiktok-affiliate-creators`
+- Cách TikTok Shop được tổ chức (có những mục nào, ở đâu) → `tiktok-shop-map`
+
+Còn lại — trang lạ, form không có API, sàn khác — thì dùng skill này.
 
 ## Quy trình chuẩn
 1. `browser__navigate` tới URL cần mở (hoặc `browser__search` nếu chưa biết URL).
@@ -37,9 +40,14 @@ vào 1 dịch vụ để lấy thông tin.
   overlay che phía trên thay vì element thật bên dưới.
 - **`browser__extract` dùng LLM để đọc trang** — nếu trang rất dài (>100,000 ký tự),
   kết quả sẽ báo bị cắt kèm `start_from_char` để tiếp tục đọc phần sau.
-- **Trang cần đăng nhập (Facebook...)**: agent KHÔNG tự đăng nhập. Session (cookie +
-  localStorage) được setup 1 lần, thủ công, NGOÀI agent bằng
-  `scripts/setup_browser_login.py` — kết quả lưu vào file JSON tại biến môi trường
-  `BROWSER_STORAGE_STATE`. Agent chỉ đọc lại session đã có sẵn; nếu trang vẫn hiện
-  form đăng nhập nghĩa là session hết hạn hoặc chưa từng chạy script setup — báo lại
-  cho người dùng, không cố tự điền thử tài khoản/mật khẩu.
+- **Trang cần đăng nhập**: agent KHÔNG tự đăng nhập. Phiên nằm trong PROFILE Chrome
+  thật của agent (không phải file JSON — cơ chế `BROWSER_STORAGE_STATE` cũ chỉ còn
+  là bản sao lưu). Người dùng đăng nhập một lần bằng `Dang-nhap-trang-web.bat` trên
+  máy họ, hoặc `scripts/setup_browser_login.py <url>` nếu chạy từ mã nguồn. Vẫn thấy
+  form đăng nhập nghĩa là phiên hết hạn hoặc chưa từng đăng nhập trang đó — báo lại
+  cho người dùng, không cố tự điền tài khoản/mật khẩu.
+- **Gặp captcha KHÁC với chưa đăng nhập.** Chỉ báo "chưa đăng nhập" khi thật sự thấy
+  form đăng nhập. Thấy captcha thì gọi `browser__wait_for_human`, không tự giải.
+- **Tải file**: bấm nút tải bằng `browser__download_file`, không phải `browser__click`
+  — chỉ tool đó mới bắt được file và lưu về máy user. Báo cáo phải ghi nguyên văn
+  đường dẫn tool trả về.

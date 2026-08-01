@@ -68,6 +68,8 @@ class SubagentDispatcher:
         self._notes_dir = notes_dir
         self._local_tools_factory = local_tools_factory
         self._configs: dict[str, SubagentConfig] = {}
+        # subagent -> (loop, hội thoại lần chạy gần nhất), phục vụ dispatch(resume=True)
+        self._last_runs: dict[str, tuple[AgentLoop, list[dict]]] = {}
 
     def register(self, config: SubagentConfig) -> None:
         self._configs[config.name] = config
@@ -81,6 +83,8 @@ class SubagentDispatcher:
         self,
         subagent_name: str,
         task: str,
+        skill: str | None = None,
+        resume: bool = False,
         on_event: Callable[[dict], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> str:
@@ -89,6 +93,12 @@ class SubagentDispatcher:
         Trả về output cuối cùng — mọi tool call/log trung gian ở lại bên trong
         context của subagent, nhưng vẫn PHÁT EVENT ra ngoài qua on_event (với
         field "agent" = tên subagent) để UI hiển thị tiến trình realtime.
+
+        resume=True: nói tiếp vào context của lần dispatch TRƯỚC thay vì dựng lại
+        từ đầu. Dành cho việc sửa sai — đo lượt chạy 01-08-2026: subagent xuất nhầm
+        một mốc ngày, main agent giao lại TOÀN BỘ quy trình, lượt đó tốn 427k token,
+        gấp 2.4 lần bình thường. Nói "mốc cuối sai, sửa lại" vào đúng context cũ thì
+        subagent đã ở sẵn trên trang, biết mình vừa làm gì, và chỉ tốn vài bước.
         """
         emit = on_event or (lambda e: None)
 
@@ -96,7 +106,22 @@ class SubagentDispatcher:
         if config is None:
             return f"Không tìm thấy subagent '{subagent_name}'."
 
-        emit({"type": "subagent_started", "name": subagent_name, "task": _preview(task)})
+        if skill:
+            task = (f"{task}\n\nĐọc `read_skill(\"{skill}\")` trước khi bắt tay làm — "
+                    "quy trình chi tiết nằm trong đó.")
+
+        prior = self._last_runs.get(subagent_name) if resume else None
+        emit({"type": "subagent_started", "name": subagent_name,
+              "task": _preview(("[nói tiếp] " if prior else "") + task)})
+
+        if prior is not None:
+            sub_loop, history = prior
+            result = sub_loop.run(task, history=history, on_event=on_event,
+                                  should_stop=should_stop, agent_name=subagent_name)
+            self._remember(subagent_name, sub_loop)
+            emit({"type": "subagent_finished", "name": subagent_name,
+                  "result_preview": _preview(result)})
+            return result
 
         scoped_registry = ToolRegistry()
         for tool in self._full_registry.all_tools():
@@ -125,8 +150,17 @@ class SubagentDispatcher:
         result = sub_loop.run(
             task, on_event=on_event, should_stop=should_stop, agent_name=subagent_name
         )
+        self._remember(subagent_name, sub_loop)
         emit({"type": "subagent_finished", "name": subagent_name, "result_preview": _preview(result)})
         return result
+
+    def _remember(self, subagent_name: str, sub_loop: AgentLoop) -> None:
+        """Giữ loop + hội thoại của lần chạy vừa rồi cho lần dispatch resume=True.
+
+        Bỏ system message: run() tự dựng lại system prompt mỗi lượt (danh sách
+        skill/subagent có thể đã đổi), nhét thêm cái cũ vào là có hai system."""
+        history = [m for m in sub_loop.last_messages if m.get("role") != "system"]
+        self._last_runs[subagent_name] = (sub_loop, history)
 
     def _build_local_tools(self, subagent_name: str) -> ToolRegistry | str:
         """Lấy registry tool local từ factory. Trả string = message lỗi cho LLM
@@ -152,13 +186,36 @@ DISPATCH_SUBAGENT_SCHEMA = {
         "description": (
             "Giao 1 task cho subagent chuyên biệt (xem <subagents> trong system prompt để biết "
             "subagent nào phù hợp). Dùng khi task cần nhiều tool call thuộc 1 domain cụ thể "
-            "và bạn chỉ cần kết quả cuối cùng, không cần thấy chi tiết xử lý."
+            "và bạn chỉ cần kết quả cuối cùng, không cần thấy chi tiết xử lý.\n"
+            "QUAN TRỌNG: subagent tự đọc được skill. ĐỪNG chép quy trình trong SKILL.md vào "
+            "'task' — chỉ nêu YÊU CẦU + tên skill và để nó tự đọc. Chép lại là trả tiền hai "
+            "lần cho cùng nội dung và có nguy cơ thuật sai."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "subagent_name": {"type": "string"},
-                "task": {"type": "string", "description": "Mô tả task cụ thể, đủ ngữ cảnh để subagent làm độc lập"},
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "Yêu cầu cần đạt + dữ liệu đầu vào cụ thể, NGẮN GỌN (vài câu). "
+                        "Vd: 'Xuất đơn hàng TikTok Shop từ 01/05/2026 đến 01/08/2026 ra file. "
+                        "Làm theo skill tiktok-order-export.' KHÔNG liệt kê lại các bước."
+                    ),
+                },
+                "skill": {
+                    "type": "string",
+                    "description": "Tên skill subagent nên đọc trước khi làm (nếu có skill phù hợp).",
+                },
+                "resume": {
+                    "type": "boolean",
+                    "description": (
+                        "true = NÓI TIẾP vào lần giao việc trước cho subagent này thay vì làm "
+                        "lại từ đầu. Dùng khi kết quả gần đúng nhưng cần sửa/bổ sung — vd sai "
+                        "một mốc ngày, thiếu một trường. Lúc đó 'task' chỉ cần nêu chỗ cần sửa. "
+                        "Rẻ hơn nhiều lần giao lại toàn bộ, và subagent vẫn đang ở nguyên trang."
+                    ),
+                },
             },
             "required": ["subagent_name", "task"],
         },

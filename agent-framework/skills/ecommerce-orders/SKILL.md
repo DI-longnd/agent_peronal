@@ -1,20 +1,28 @@
 ---
-name: ecommerce-order-processing
+name: ecom-demo-mock-api
 description: >
-  Xử lý đơn hàng thương mại điện tử — kiểm tra trạng thái, hoàn tiền, cập nhật tồn kho.
-  Dùng khi task nhắc tới đơn hàng, mã đơn, khách hàng, hoàn tiền, hoặc sàn TMĐT.
+  SKILL DEMO KỸ THUẬT, KHÔNG DÙNG CHO VIỆC THẬT. Minh hoạ đường tool chạy phía
+  server (không cần máy khách) và cách gọi script trong skill. Dữ liệu trả về là
+  BỊA. Chỉ dùng khi user nói rõ "chạy demo ecom" hoặc "thử tool mock". Yêu cầu
+  thật về đơn hàng TikTok Shop -> dùng tiktok-order-export.
 ---
 
-# Ecommerce Order Processing
+# DEMO — Tool phía server + script trong skill
+
+> ⚠️ **Skill này KHÔNG nối với sàn thật.** `ecom__check_order_status`,
+> `ecom__process_refund`, `ecom__update_inventory` đều trả chuỗi bịa sẵn.
+> Tuyệt đối không báo con số từ đây cho user như dữ liệu thật — nếu lỡ chạy,
+> phải nói rõ "đây là dữ liệu demo".
+>
+> Nó tồn tại để giữ một ví dụ chạy được của hai cơ chế: tool thực thi trên server
+> (khác `browser__*` chạy trên máy khách) và `run_skill_script` (tầng 3).
 
 ## Khi nào dùng skill này
-Task nhắc tới đơn hàng cụ thể (có mã đơn hoặc tên khách hàng) cần tra cứu/xử lý.
-KHÔNG dùng cho câu hỏi chung chung về chính sách bán hàng (thuộc skill khác).
+CHỈ khi user nói rõ đang muốn thử demo. Việc thật về đơn hàng → `tiktok-order-export`.
 
-## Quy trình kiểm tra đơn hàng
-1. Chạy `run_skill_script(name="ecommerce-order-processing", script_relpath="scripts/check_order.py", args=[<order_id>])`
-2. Đọc kết quả trả về (JSON: status, amount, customer)
-3. Nếu status là "disputed", đọc thêm `references/refund_policy.md` trước khi đề xuất hướng xử lý
+## Quy trình kiểm tra đơn hàng (demo)
+1. Chạy `run_skill_script(name="ecom-demo-mock-api", script_relpath="scripts/check_order.py", args=[<order_id>])`
+2. Đọc kết quả trả về (JSON: status, amount, customer) — **dữ liệu bịa**
 
 ## Gotchas
 - Mã đơn trên sàn A có format `SA-XXXXX`, trên sàn B là `SB_XXXXX` — không dùng chung 1 regex parse cho cả 2.
@@ -22,7 +30,7 @@ KHÔNG dùng cho câu hỏi chung chung về chính sách bán hàng (thuộc sk
 - Số tiền trả về từ script là đơn vị nghìn đồng (vd: 200 nghĩa là 200,000đ), không phải đồng.
 
 ## Output format khi báo cáo cho user
-Luôn trả lời theo mẫu:
+Mở đầu bằng một dòng "⚠️ Dữ liệu demo, không phải đơn hàng thật", rồi theo mẫu:
 - Mã đơn: ...
 - Trạng thái: ...
 - Số tiền: ... (đã quy đổi ra đồng)

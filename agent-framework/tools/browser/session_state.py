@@ -83,6 +83,26 @@ def status(state: dict, now: float | None = None) -> tuple[str, str]:
     return 'expired', f'Phiên đăng nhập ĐÃ HẾT HẠN lúc {when} — cần đăng nhập lại.'
 
 
+def expires_at(state: dict, now: float | None = None) -> float | None:
+    """Thời điểm phiên đứt (giây epoch), None nếu không xác định được.
+
+    Cùng cách tính với status(): hạn SỚM NHẤT trong nhóm cookie phiên còn sống —
+    một cookie chết là cả phiên hỏng, nên hạn sớm nhất mới là hạn thật."""
+    now = now or time.time()
+    auth = [c for c in (state.get('cookies') or []) if _is_auth(c.get('name', ''))]
+    exps = [e for e in (_expiry(c) for c in auth) if e is not None and e > now]
+    return min(exps) if exps else None
+
+
+def hours_left(path: str | Path | None, now: float | None = None) -> float | None:
+    """Số giờ còn lại của phiên đã lưu. None = không đọc được / không xác định."""
+    state = read(path) if path else None
+    if not state:
+        return None
+    exp = expires_at(state, now)
+    return None if exp is None else (exp - (now or time.time())) / 3600
+
+
 def issued_at(state: dict) -> float | None:
     """Thời điểm server cấp phiên hiện tại, đọc từ cookie sid_guard*.
 

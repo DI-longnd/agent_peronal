@@ -27,8 +27,11 @@ nhiều search dồn dập → TikTok bật captcha ngay + vi phạm ràng buộ
 
 Xử lý TỪNG TÊN MỘT — mỗi tên dispatch browser-agent 1 lần với task ghi rõ các bước
 dưới đây. Browser giữ nguyên phiên qua các tên (không tắt/mở lại). Mỗi tên mất
-~1-2 phút. Danh sách quá **5 tên** thì làm **5 tên đầu**, gom kết quả, rồi nói user
-gửi phần còn lại ở lượt sau (tránh vượt timeout run 300s do đã có delay giống người).
+~1-2 phút. Danh sách quá **8 tên** thì làm **8 tên đầu**, gom kết quả, rồi nói user
+gửi phần còn lại ở lượt sau.
+
+(Trần này bám theo `RUN_TIMEOUT_SECONDS`, mặc định **600s** — xem server/config.py.
+Bản trước ghi 300s và tự giới hạn 5 tên: con số đó sai, đang bỏ phí một nửa năng lực.)
 Nếu 1 tên gặp captcha, browser-agent gọi `browser__wait_for_human` cho tên đó rồi
 đi tiếp — KHÔNG bỏ cả danh sách. Tên không tìm thấy → ghi `N/A` + ghi chú, làm tiếp
 tên sau.

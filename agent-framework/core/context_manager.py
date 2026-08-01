@@ -17,14 +17,26 @@ from __future__ import annotations
 from pathlib import Path
 from core.llm_client import LLMClient
 
-# Ước lượng thô: ~4 ký tự/token (tiếng Anh). Với tiếng Việt tỷ lệ có thể khác,
-# nên coi đây là ngưỡng an toàn (overestimate), không phải con số chính xác.
+# Ước lượng thô: ~4 ký tự/token. Chỉ dùng khi CHƯA có số thật từ API — sau lượt gọi
+# đầu tiên thì luôn ưu tiên prompt_tokens do nhà cung cấp trả về.
 CHARS_PER_TOKEN_ESTIMATE = 4
 
 
 def estimate_tokens(messages: list[dict]) -> int:
-    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
-    return total_chars // CHARS_PER_TOKEN_ESTIMATE
+    """Đếm cả tool_calls, không chỉ content.
+
+    Bản cũ chỉ cộng `m["content"]`. Message của assistant khi gọi tool có
+    content=None và toàn bộ nội dung nằm trong tool_calls — bị bỏ sót hoàn toàn.
+    Đo lượt chạy 01-08-2026: ngưỡng đặt 6.000 nhưng chỉ kích hoạt khi prompt thật
+    đã 13.800 token, hụt 2.3 lần. Phần thiếu chủ yếu là payload tool_calls (có lệnh
+    giao việc dài 4.500 token) và schema của 21 tool gửi kèm mỗi lượt."""
+    total = 0
+    for m in messages:
+        total += len(str(m.get("content") or ""))
+        for call in m.get("tool_calls") or []:
+            fn = call.get("function", {}) if isinstance(call, dict) else {}
+            total += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
+    return total // CHARS_PER_TOKEN_ESTIMATE
 
 
 COMPACTION_PROMPT = """Tóm tắt hội thoại agent bên dưới thành 1 đoạn văn ngắn gọn.
@@ -42,12 +54,21 @@ Hội thoại cần tóm tắt:
 
 
 class ContextManager:
-    def __init__(self, llm: LLMClient, notes_path: Path, compaction_threshold_tokens: int = 6000):
+    # Ngưỡng tính bằng TOKEN THẬT. Giá trị cũ 6.000 là token ƯỚC LƯỢNG và trên thực
+    # tế kích hoạt ở ~13.800 token thật; 12.000 giữ nguyên tinh thần đó nhưng nói
+    # đúng điều nó làm, và chỉnh được. Đừng hạ quá thấp: mỗi lần compact tốn thêm
+    # một lượt gọi LLM có kèm cả bản ghi hội thoại, nén quá dày lại đắt hơn.
+    def __init__(self, llm: LLMClient, notes_path: Path, compaction_threshold_tokens: int = 12000):
         self._llm = llm
         self._notes_path = notes_path
         self._threshold = compaction_threshold_tokens
 
-    def should_compact(self, messages: list[dict]) -> bool:
+    def should_compact(self, messages: list[dict], actual_prompt_tokens: int | None = None) -> bool:
+        """Ưu tiên số THẬT do API trả về ở lượt trước — nó đã tính cả schema tool và
+        payload tool_calls, những thứ đếm tay không bao giờ khớp. Ước lượng chỉ dùng
+        cho lượt đầu tiên, khi chưa gọi API lần nào."""
+        if actual_prompt_tokens:
+            return actual_prompt_tokens > self._threshold
         return estimate_tokens(messages) > self._threshold
 
     def compact(self, messages: list[dict], keep_last_n: int = 4) -> list[dict]:

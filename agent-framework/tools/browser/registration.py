@@ -60,6 +60,16 @@ BROWSER_TOOL_SPECS: list[dict] = [
                     "default": False,
                     "description": "Chỉ bật nếu model đang dùng có vision (GPT-4o, Claude...). DeepSeek không có vision.",
                 },
+                "contains": {
+                    "type": "string",
+                    "description": (
+                        "Chỉ hiện element có chữ khớp, ngăn cách bằng '|' (vd \"Xuất|Tải xuống\"). "
+                        "[index] VẪN đúng vì chỉ ẩn dòng hiển thị, không đánh số lại. "
+                        "Dùng khi ĐÃ BIẾT mình tìm nút nào: trang lớn có ~75 element mà "
+                        "quá nửa là menu điều hướng lặp lại, lọc bớt thì rẻ hơn nhiều. "
+                        "Chưa quen trang thì cứ gọi không kèm tham số này để xem đầy đủ."
+                    ),
+                },
             },
         },
         "method": "get_state",

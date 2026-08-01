@@ -40,7 +40,35 @@ Lúc đó đừng đoán: xuất nhầm khoảng thì file sai mà nhìn không 
 
 ## Quy trình
 
-### Bước 1 — Vào thẳng URL đã kèm khoảng ngày (KHÔNG dùng bộ lọc)
+### Bước 1 — Lấy URL bằng script, ĐỪNG tự tính
+
+```
+run_skill_script(name="tiktok-order-export", script_relpath="scripts/daterange.py",
+                 args=["01/05/2026", "01/08/2026"])
+```
+
+Script trả về khoảng ngày đã diễn giải, số ngày, chip cần thấy, và URL dùng luôn.
+Mốc tương đối thì truyền cờ thay vì tự quy đổi:
+
+| User nói | args |
+|---|---|
+| "7 ngày qua" | `["--last-days", "7"]` |
+| "3 tháng gần nhất" | `["--last-months", "3"]` |
+| "tháng này" | `["--this-month"]` |
+| "tháng trước" | `["--last-month"]` |
+| "hôm nay" | `["--today"]` |
+| ngày cụ thể | `["01/05/2026", "01/08/2026"]` |
+
+Script neo cứng giờ VN (GMT+7) nên không lệ thuộc múi giờ máy chạy.
+
+**Vì sao bắt buộc dùng script:** đo 01-08-2026, agent được yêu cầu "đến 01/08" nhưng
+chép mốc `1785517199999` (31/07) từ ví dụ bên dưới, xuất thiếu một ngày rồi tự bịa lý
+do "giới hạn kỹ thuật của TikTok Shop". Main agent bắt được và giao lại, nhưng lượt đó
+tốn 427k token — gấp 2.4 lần. Phép tính này tất định, đừng làm bằng suy luận.
+
+Script hỏng hoặc không chạy được thì mới tự tính theo mục dưới đây.
+
+### Bước 1b — Cấu tạo URL (chỉ cần khi script không dùng được)
 
 Trang mã hoá khoảng ngày vào URL bằng **2 mốc Unix timestamp mili-giây**:
 
